@@ -3668,7 +3668,10 @@ pub async fn update_plugin_settings(
         "plugin",
         &id,
         &id,
-        &format!("Updated {} plugin setting(s). Values are not written to audit logs.", body.values.len()),
+        &format!(
+            "Updated {} plugin setting(s). Values are not written to audit logs.",
+            body.values.len()
+        ),
     )
     .await;
 
