@@ -81,9 +81,57 @@ jobs:
           checksum: sha256
           token: ${{ secrets.GITHUB_TOKEN }}
 
+  plugins:
+    name: build signed plugins
+    needs: [create-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Prepare plugin signing key
+        id: signing
+        env:
+          SIGNING_KEY_PEM: ${{ secrets.KINETIX_PLUGIN_SIGNING_KEY_PEM }}
+        run: |
+          if [ -z "$SIGNING_KEY_PEM" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "KINETIX_PLUGIN_SIGNING_KEY_PEM is not configured; skipping plugin release assets."
+            exit 0
+          fi
+          printf '%s' "$SIGNING_KEY_PEM" > "$RUNNER_TEMP/plugin-signing-key.pem"
+          chmod 600 "$RUNNER_TEMP/plugin-signing-key.pem"
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+      - name: Install wasm-tools
+        if: steps.signing.outputs.enabled == 'true'
+        run: cargo install wasm-tools --locked
+
+      - name: Build signed first-party plugins
+        if: steps.signing.outputs.enabled == 'true'
+        env:
+          KINETIX_PLUGIN_SIGNING_KEY_FILE: ${{ runner.temp }}/plugin-signing-key.pem
+        run: scripts/build-plugin.sh plugins/antigravity-oauth
+
+      - name: Upload plugin release assets
+        if: steps.signing.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          gh release upload "$TAG" plugins/antigravity-oauth/*.kxp \
+            --clobber --repo "${{ github.repository }}"
+
   provenance:
     name: attestations & checksums
-    needs: [binaries]
+    needs: [binaries, plugins]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -102,7 +150,10 @@ jobs:
           mkdir -p /tmp/release-assets
           cd /tmp/release-assets
           gh release download "$TAG" -p "kinetix-*.tar.gz" --repo "${{ github.repository }}"
-          sha256sum kinetix-*.tar.gz > SHA256SUMS
+          gh release download "$TAG" -p "*.kxp" --repo "${{ github.repository }}" || true
+          shopt -s nullglob
+          ASSETS=(kinetix-*.tar.gz *.kxp)
+          sha256sum "${ASSETS[@]}" > SHA256SUMS
           gh release upload "$TAG" SHA256SUMS --clobber --repo "${{ github.repository }}"
 
       - name: Attest build provenance
