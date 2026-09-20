@@ -328,9 +328,17 @@ Rolling back is deliberately a reactivation, not a pointer swap:
 6. recompile the WebAssembly component;
 7. activate it through the normal plugin upsert path.
 
+Before rollback, the dashboard requests a retained-package preview. Kinetix
+re-hashes and revalidates the target package, then computes a semantic
+permission delta for:
+
+- added/removed `network_hosts`;
+- added/removed `credential_scopes`;
+- changes to `credential_read`.
+
 The reactivated package is always **disabled** and all permission grants are
-cleared. An operator must review and approve the rolled-back manifest before it
-can be enabled again.
+cleared even when the diff is empty. An operator must review and approve the
+rolled-back manifest before it can be enabled again.
 
 ## Operating Plugins
 
