@@ -395,6 +395,17 @@ impl auth_world::exports::auth_flow::Guest for Component {
             url.push_str(&urlencode(&challenge));
             url.push_str("&code_challenge_method=S256");
         }
+        if let Some(bytes) =
+            auth_world::kinetix::plugin::host_storage::get("_config:login_hint")
+        {
+            if let Ok(hint) = String::from_utf8(bytes) {
+                let hint = hint.trim();
+                if !hint.is_empty() {
+                    url.push_str("&login_hint=");
+                    url.push_str(&urlencode(hint));
+                }
+            }
+        }
         Ok(url)
     }
 
