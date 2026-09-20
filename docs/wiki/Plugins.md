@@ -72,8 +72,8 @@ Plugins interact with Kinetix solely through typed interfaces defined in `wit/ki
 * **WIT World**: `plugin` (`interface routing-fact-provider`)
 * **Exported Functions**: `evaluate-facts`
 * **Contract**: Computes typed facts exposed to executable Route predicates under the namespace `plugin.<plugin-id>.<fact-name>` (e.g. `plugin.dev.example.geo.region`).
-  * `pure` providers: Side-effect free; forbidden from making outbound network calls.
-  * `cached` providers: Periodically refreshed; values older than `max_age_ms` expire and evaluate as `unknown`.
+  * `pure` providers: Evaluated on the request path with buffered HTTP disabled.
+  * `cached` providers: Refreshed by Kinetix off the request path at `routing_facts_refresh_ms` (default 30s, allowed 5s–1h). Approved buffered HTTP is available only during that refresh. The returned facts and any `cache-set` publications are validated, host-stamped, and committed as one atomic snapshot. Values older than `max_age_ms` expire and evaluate as `unknown`; a failed refresh leaves the previous snapshot intact.
 
 ### 4. Health Probe
 * **WIT World**: `plugin` (`interface health-probe`)
