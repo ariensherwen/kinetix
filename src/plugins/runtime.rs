@@ -153,6 +153,9 @@ pub struct HostCtx {
     pub max_outbound_requests: u32,
     /// Max outbound body size.
     pub max_http_body: u64,
+    /// Entire host-mediated HTTP request budget, derived from the effective
+    /// plugin wall-time limit so awaiting I/O cannot outlive the invocation.
+    pub http_timeout: Duration,
     /// Whether the plugin may open the streaming adapter transport (§7.1).
     pub adapter_stream: bool,
     /// Whether this specific invocation may use buffered host-http. Authority
@@ -414,10 +417,16 @@ async fn resolve_plugin_destination(
     Ok(addrs)
 }
 
-fn pinned_plugin_client(host: &str, addrs: &[SocketAddr]) -> Result<reqwest::Client, String> {
+fn pinned_plugin_client(
+    host: &str,
+    addrs: &[SocketAddr],
+    timeout: Duration,
+) -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .https_only(true)
-        .connect_timeout(Duration::from_secs(10))
+        .no_proxy()
+        .timeout(timeout)
+        .connect_timeout(timeout.min(Duration::from_secs(10)))
         .redirect(reqwest::redirect::Policy::none())
         .http2_adaptive_window(true)
         .user_agent(concat!("kinetix-plugin-host/", env!("CARGO_PKG_VERSION")))
@@ -494,7 +503,7 @@ impl bindings::kinetix::plugin::host_http::Host for HostCtx {
             Ok(addrs) => addrs,
             Err(message) => return Ok(Err(err("permission_denied", message))),
         };
-        let client = match pinned_plugin_client(&host, &addrs) {
+        let client = match pinned_plugin_client(&host, &addrs, self.http_timeout) {
             Ok(client) => client,
             Err(message) => return Ok(Err(err("upstream_unavailable", message))),
         };
@@ -835,6 +844,7 @@ mod tests {
             storage_quota: 1024,
             max_outbound_requests: 1,
             max_http_body: 1024,
+            http_timeout: Duration::from_secs(1),
             adapter_stream: false,
             buffered_http_allowed: false,
             outbound_count: 0,
@@ -860,6 +870,7 @@ mod tests {
             storage_quota: 1024,
             max_outbound_requests: 1,
             max_http_body: 1024,
+            http_timeout: Duration::from_secs(1),
             adapter_stream: false,
             buffered_http_allowed,
             outbound_count: 0,
