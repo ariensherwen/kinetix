@@ -45,7 +45,7 @@ Plugins execute inside a strictly isolated WebAssembly sandbox with **zero ambie
 ### Safety Guarantees
 
 1. **Hardware-Enforced Memory Isolation**: Plugins run in WebAssembly linear memory. They cannot inspect host process memory, execute arbitrary system calls, or access the local filesystem or environment.
-2. **Mediated Network Access**: Plugins have no direct socket access. Outbound HTTP requests must pass through the host HTTP capability, strictly filtered against the plugin's approved `network_hosts`. Provider adapters (`plugin-adapter` world) import **no network capabilities at all**.
+2. **Mediated Network Access**: Plugins have no direct socket access. Outbound HTTP requests must pass through the host HTTP capability and an approved `network_hosts` entry. Kinetix resolves the destination, rejects private/link-local/metadata/special-use IPs, pins the checked DNS answers into a no-proxy/no-redirect HTTPS client, and rejects plugin-supplied `Host` or hop-by-hop/proxy headers before sending. Provider adapters (`plugin-adapter` world) import **no network capabilities at all**.
 3. **Encrypted Storage Isolation**: Each plugin receives an isolated logical namespace in SQLite (`plugin_kv`). Values are encrypted with AES-256-GCM using a key derived from `KINETIX_MASTER_KEY` under the context label `kinetix-plugin-kv`.
 4. **All-or-Nothing Permissions**: Operators approve the entire declared permission set before a plugin can be enabled. Revoking any grant disables the plugin immediately.
 5. **Preemptive Execution Limits**: Execution is preempted by Wasmtime epoch interruption (10 ms ticks, default 10 s deadline for evaluations; 30 s for adapter stream setup). Memory is capped at 64 MiB per store.
