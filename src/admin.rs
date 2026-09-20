@@ -3705,6 +3705,20 @@ pub async fn start_plugin_auth(
             "plugin authorization URL must use https",
         ));
     }
+    let auth_host = parsed
+        .host_str()
+        .ok_or_else(|| ApiError::bad("plugin authorization URL has no host"))?;
+    if !manifest
+        .permissions
+        .network_hosts
+        .iter()
+        .any(|pattern| crate::plugins::manifest::host_matches(pattern, auth_host))
+    {
+        state.plugin_auth_sessions.revoke(&pending.state);
+        return Err(ApiError::bad(format!(
+            "authorization host '{auth_host}' is not declared in plugin network_hosts"
+        )));
+    }
 
     Ok(Json(json!({
         "authorize_url": authorize_url,
@@ -3727,6 +3741,13 @@ pub async fn plugin_auth_callback(
     State(state): State<AppState>,
     Query(query): Query<PluginAuthCallbackQuery>,
 ) -> Result<Redirect, ApiError> {
+    if !db_healthy(&state).await {
+        return Err(ApiError(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "plugin account authorization unavailable: control plane degraded".into(),
+        ));
+    }
+
     let session = state
         .plugin_auth_sessions
         .take(&query.state)
