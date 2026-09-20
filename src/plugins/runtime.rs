@@ -25,6 +25,18 @@ pub mod bindings {
     });
 }
 
+/// Optional account-authorization world. Separate binding preserves plugin API
+/// v1 compatibility for components that do not provide auth flows.
+pub mod auth_bindings {
+    wasmtime::component::bindgen!({
+        path: "wit/kinetix-plugin.wit",
+        world: "plugin-auth",
+        imports: { default: async | trappable },
+        exports: { default: async },
+        anyhow: true,
+    });
+}
+
 /// Adapter world (§6.3, §7.1). Kept separate so the buffered host-http import
 /// can never be used as the adapter transport. Adapters are synchronous
 /// translation functions, so this world is bound synchronously and invoked via
@@ -243,6 +255,20 @@ impl PluginRuntime {
         bindings::Plugin::instantiate_async(store, component, linker)
             .await
             .map_err(|e| anyhow::anyhow!("instantiating plugin component: {e}"))
+    }
+
+    /// Instantiate the optional account-authorization world. The imported host
+    /// interfaces are the same named package interfaces already registered in
+    /// the linker by the main plugin world.
+    pub async fn instantiate_auth(
+        &self,
+        linker: &Linker<HostCtx>,
+        store: &mut Store<HostCtx>,
+        component: &Component,
+    ) -> Result<auth_bindings::PluginAuth> {
+        auth_bindings::PluginAuth::instantiate_async(store, component, linker)
+            .await
+            .map_err(|e| anyhow::anyhow!("instantiating plugin auth component: {e}"))
     }
 
     /// Instantiate the adapter world (§6.3). Uses the same linker (the host
