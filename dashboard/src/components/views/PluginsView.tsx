@@ -440,6 +440,51 @@ export const PluginsView: React.FC = () => {
                 </div>
               </WobblyCard>
 
+              {selected.integrations.length > 0 && (
+                <WobblyCard decoration="tape" className="p-5">
+                  <h4 className="text-lg font-heading font-bold mb-3">Integrations</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {selected.integrations.map((integration) => (
+                      <div
+                        key={integration.id}
+                        className="p-4 border-2 border-[var(--ink)]/30 bg-[var(--surface)]"
+                        style={{ borderRadius: '12px 9px 14px 10px / 9px 14px 9px 12px' }}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="font-heading font-bold">{integration.name}</div>
+                            <code className="text-[0.7rem] text-[var(--ink)]/55">{integration.id}</code>
+                          </div>
+                          <SketchBadge variant="blue">Integration</SketchBadge>
+                        </div>
+                        {integration.description && (
+                          <p className="mt-2 text-sm font-body text-[var(--ink)]/75">
+                            {integration.description}
+                          </p>
+                        )}
+                        <div className="mt-3 flex flex-wrap gap-1">
+                          {integration.provider_adapter && (
+                            <code className="text-xs bg-[var(--erased)] px-2 py-1">
+                              adapter:{integration.provider_adapter}
+                            </code>
+                          )}
+                          {integration.credential_strategy && (
+                            <code className="text-xs bg-[var(--erased)] px-2 py-1">
+                              auth:{integration.credential_strategy}
+                            </code>
+                          )}
+                          {integration.model_source && (
+                            <code className="text-xs bg-[var(--erased)] px-2 py-1">
+                              models:{integration.model_source}
+                            </code>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </WobblyCard>
+              )}
+
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                 <WobblyCard className="p-5">
                   <h4 className="text-lg font-heading font-bold flex items-center gap-2 mb-3">
