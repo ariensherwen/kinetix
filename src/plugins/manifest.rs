@@ -110,6 +110,7 @@ pub fn validate(manifest: Manifest, policy: HostPolicy) -> Result<ValidatedManif
         }
         if integration.provider_adapter.is_none()
             && integration.credential_strategy.is_none()
+            && integration.auth_flow.is_none()
             && integration.model_source.is_none()
         {
             bail!(
@@ -130,6 +131,15 @@ pub fn validate(manifest: Manifest, policy: HostPolicy) -> Result<ValidatedManif
             if !manifest.provides.credential_strategies.contains(name) {
                 bail!(
                     "integration '{}' references unknown credential_strategy '{}'",
+                    integration.id,
+                    name
+                );
+            }
+        }
+        if let Some(name) = &integration.auth_flow {
+            if !manifest.provides.auth_flows.contains(name) {
+                bail!(
+                    "integration '{}' references unknown auth_flow '{}'",
                     integration.id,
                     name
                 );
@@ -369,6 +379,25 @@ storage = "2MiB"
         assert!(
             err.to_string()
                 .contains("must reference at least one provided capability"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn rejects_integration_referencing_missing_auth_flow() {
+        let bad = GOOD
+            .replace(
+                "model_sources = [\"foo-models\"]",
+                "model_sources = [\"foo-models\"]\nauth_flows = [\"foo-login\"]",
+            )
+            .replace(
+                "model_source = \"foo-models\"",
+                "auth_flow = \"missing-login\"",
+            );
+        let err = parse_and_validate(&bad, HostPolicy::default()).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("unknown auth_flow 'missing-login'"),
             "{err}"
         );
     }
