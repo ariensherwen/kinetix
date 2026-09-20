@@ -753,6 +753,44 @@ storage = "2MiB"
     }
 
     #[test]
+    fn rejects_unknown_model_source_v2() {
+        let bad = GOOD
+            .replace(
+                "model_sources = [\"foo-models\"]",
+                "model_sources = [\"foo-models\"]\nmodel_sources_v2 = [\"foo-models-v2\"]",
+            )
+            .replace(
+                "model_source = \"foo-models\"",
+                "model_source_v2 = \"missing-v2\"",
+            );
+        let err = parse_and_validate(&bad, HostPolicy::default()).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("references unknown model_source_v2 'missing-v2'"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn rejects_both_model_source_versions_on_one_integration() {
+        let bad = GOOD
+            .replace(
+                "model_sources = [\"foo-models\"]",
+                "model_sources = [\"foo-models\"]\nmodel_sources_v2 = [\"foo-models-v2\"]",
+            )
+            .replace(
+                "model_source = \"foo-models\"",
+                "model_source = \"foo-models\"\nmodel_source_v2 = \"foo-models-v2\"",
+            );
+        let err = parse_and_validate(&bad, HostPolicy::default()).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("may declare only one of model_source or model_source_v2"),
+            "{err}"
+        );
+    }
+
+    #[test]
     fn rejects_ui_action_with_unknown_integration() {
         let bad = GOOD.replace("integration = \"foo\"", "integration = \"missing\"");
         let err = parse_and_validate(&bad, HostPolicy::default()).unwrap_err();
