@@ -112,15 +112,8 @@ jobs:
               ],
           )
 
-          test_ctor = """        let manager = PluginManager::new(
-              pool.clone(),
-              Arc::new(Crypto::new(&[29_u8; 32])),
-              HostPolicy::default(),"""
-          test_ctor_new = """        let manager = PluginManager::new(
-              pool.clone(),
-              Arc::new(Crypto::new(&[29_u8; 32])),
-              reqwest::Client::new(),
-              HostPolicy::default(),"""
+          test_ctor = "            Arc::new(Crypto::new(&[29_u8; 32])),\n            HostPolicy::default(),"
+          test_ctor_new = "            Arc::new(Crypto::new(&[29_u8; 32])),\n            reqwest::Client::new(),\n            HostPolicy::default(),"
           if test_ctor not in text:
               raise SystemExit("concurrency test PluginManager constructor pattern missing")
           text = text.replace(test_ctor, test_ctor_new, 1)
