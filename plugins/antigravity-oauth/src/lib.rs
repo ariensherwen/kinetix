@@ -28,8 +28,17 @@ mod adapter;
 use kinetix::plugin::types::*;
 use kinetix_plugin_sdk::{export, exports, kinetix};
 
-/// Google OAuth token endpoint.
+/// Google OAuth endpoints used by the account authorization flow.
+const AUTHORIZE_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
+const USERINFO_URL: &str = "https://www.googleapis.com/oauth2/v1/userinfo";
+const ANTIGRAVITY_SCOPES: &[&str] = &[
+    "https://www.googleapis.com/auth/cloud-platform",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+    "https://www.googleapis.com/auth/cclog",
+    "https://www.googleapis.com/auth/experimentsandconfigs",
+];
 
 /// Public Antigravity CLI OAuth client ID and secret (obfuscated as byte arrays
 /// so static scanners do not mistake public desktop-app credentials for server secrets).
@@ -319,6 +328,190 @@ fn urlencode(s: &str) -> String {
 fn truncate(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
 }
+
+// --- Optional account authorization world. ---------------------------------
+
+use kinetix_plugin_sdk::auth as auth_world;
+
+type AuthPluginError = auth_world::kinetix::plugin::types::PluginError;
+type AuthHttpRequest = auth_world::kinetix::plugin::types::HttpRequest;
+type AuthResult = auth_world::kinetix::plugin::types::AuthResult;
+
+fn auth_error(code: &str, message: impl Into<String>, retryable: bool) -> AuthPluginError {
+    AuthPluginError {
+        code: code.into(),
+        message: message.into(),
+        retryable,
+        retry_after: None,
+        reset_at: None,
+    }
+}
+
+fn require_antigravity_flow(flow_name: &str) -> Result<(), AuthPluginError> {
+    if flow_name == "antigravity" {
+        Ok(())
+    } else {
+        Err(auth_error(
+            "invalid_configuration",
+            format!("unknown auth flow '{flow_name}'"),
+            false,
+        ))
+    }
+}
+
+impl auth_world::exports::auth_flow::Guest for Component {
+    fn begin(
+        flow_name: String,
+        redirect_uri: String,
+        state: String,
+        pkce_challenge: Option<String>,
+    ) -> Result<String, AuthPluginError> {
+        require_antigravity_flow(&flow_name)?;
+
+        let mut url = format!(
+            "{AUTHORIZE_URL}?client_id={}&response_type=code&redirect_uri={}&scope={}&state={}&access_type=offline&prompt=consent",
+            urlencode(&default_client_id()),
+            urlencode(&redirect_uri),
+            urlencode(&ANTIGRAVITY_SCOPES.join(" ")),
+            urlencode(&state),
+        );
+        if let Some(challenge) = pkce_challenge.filter(|value| !value.is_empty()) {
+            url.push_str("&code_challenge=");
+            url.push_str(&urlencode(&challenge));
+            url.push_str("&code_challenge_method=S256");
+        }
+        Ok(url)
+    }
+
+    fn exchange(
+        flow_name: String,
+        code: String,
+        redirect_uri: String,
+        pkce_verifier: Option<String>,
+    ) -> Result<AuthResult, AuthPluginError> {
+        require_antigravity_flow(&flow_name)?;
+
+        let mut form = format!(
+            "grant_type=authorization_code&client_id={}&client_secret={}&code={}&redirect_uri={}",
+            urlencode(&default_client_id()),
+            urlencode(&default_client_secret()),
+            urlencode(&code),
+            urlencode(&redirect_uri),
+        );
+        if let Some(verifier) = pkce_verifier.filter(|value| !value.is_empty()) {
+            form.push_str("&code_verifier=");
+            form.push_str(&urlencode(&verifier));
+        }
+
+        let req = AuthHttpRequest {
+            method: "POST".into(),
+            url: TOKEN_URL.into(),
+            headers: vec![
+                (
+                    "content-type".into(),
+                    "application/x-www-form-urlencoded".into(),
+                ),
+                ("accept".into(), "application/json".into()),
+            ],
+            body: form.into_bytes(),
+            credential: None,
+        };
+        let resp = auth_world::kinetix::plugin::host_http::send(&req)
+            .map_err(|e| auth_error(&e.code, e.message, e.retryable))?;
+        if resp.body_truncated {
+            return Err(auth_error(
+                "upstream_unavailable",
+                "token response truncated",
+                true,
+            ));
+        }
+        let text = String::from_utf8(resp.body)
+            .map_err(|_| auth_error("protocol_error", "token response not utf-8", false))?;
+        if resp.status != 200 {
+            return Err(auth_error(
+                "credential_expired",
+                format!(
+                    "token endpoint returned HTTP {}: {}",
+                    resp.status,
+                    truncate(&text, 200)
+                ),
+                false,
+            ));
+        }
+
+        let tokens: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|e| auth_error("protocol_error", format!("invalid token JSON: {e}"), false))?;
+        let access_token = tokens
+            .get("access_token")
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| auth_error("protocol_error", "token response missing access_token", false))?
+            .to_string();
+        let refresh_token = tokens
+            .get("refresh_token")
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                auth_error(
+                    "credential_expired",
+                    "Google did not return a refresh_token; retry the login and grant consent",
+                    false,
+                )
+            })?
+            .to_string();
+        let expires_in = tokens
+            .get("expires_in")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(3600);
+        let expiry = format_rfc3339_ms(
+            kinetix_plugin_sdk::helpers::now_unix_millis() + expires_in * 1000,
+        );
+
+        let mut email: Option<String> = None;
+        let mut metadata: Option<String> = None;
+        let userinfo_req = AuthHttpRequest {
+            method: "GET".into(),
+            url: format!("{USERINFO_URL}?alt=json"),
+            headers: vec![
+                ("authorization".into(), format!("Bearer {access_token}")),
+                ("x-request-source".into(), "local".into()),
+            ],
+            body: vec![],
+            credential: None,
+        };
+        if let Ok(userinfo_resp) = auth_world::kinetix::plugin::host_http::send(&userinfo_req) {
+            if userinfo_resp.status == 200 && !userinfo_resp.body_truncated {
+                if let Ok(body) = String::from_utf8(userinfo_resp.body) {
+                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&body) {
+                        email = value
+                            .get("email")
+                            .and_then(|value| value.as_str())
+                            .map(str::to_string);
+                        metadata = Some(value.to_string());
+                    }
+                }
+            }
+        }
+
+        let secret = Credential {
+            refresh_token: Some(refresh_token),
+            access_token: Some(access_token),
+            expiry: Some(expiry),
+            project_id: None,
+            email: email.clone(),
+        };
+        let secret_json = serde_json::to_string(&secret)
+            .map_err(|e| auth_error("plugin_internal", format!("encoding credential: {e}"), false))?;
+
+        Ok(AuthResult {
+            secret_json,
+            account_label: email.or_else(|| Some("Antigravity".into())),
+            metadata_json: metadata,
+        })
+    }
+}
+
+auth_world::export!(Component with_types_in kinetix_plugin_sdk::auth);
 
 // --- The world requires every export interface to be implemented. -----------
 
