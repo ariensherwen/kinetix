@@ -3716,10 +3716,7 @@ pub async fn start_plugin_auth(
         .await
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found("provider not found"))?;
-    let expected_binding = format!(
-        "plugin:{}/{}",
-        body.plugin_id, credential_strategy
-    );
+    let expected_binding = format!("plugin:{}/{}", body.plugin_id, credential_strategy);
     if provider.credential_plugin != expected_binding {
         return Err(ApiError::bad(format!(
             "provider '{}' is not bound to integration credential strategy '{}'",
@@ -3759,9 +3756,7 @@ pub async fn start_plugin_auth(
         .map_err(|_| ApiError::bad("plugin returned an invalid authorization URL"))?;
     if parsed.scheme() != "https" {
         state.plugin_auth_sessions.revoke(&pending.state);
-        return Err(ApiError::bad(
-            "plugin authorization URL must use https",
-        ));
+        return Err(ApiError::bad("plugin authorization URL must use https"));
     }
     let auth_host = parsed
         .host_str()
@@ -3890,9 +3885,7 @@ pub async fn plugin_auth_callback(
             "Provider credential binding changed while browser authorization was in progress; account enrollment refused.",
         )
         .await;
-        return Ok(Redirect::to(
-            "/admin/plugins?plugin_auth=binding_changed",
-        ));
+        return Ok(Redirect::to("/admin/plugins?plugin_auth=binding_changed"));
     }
     let enc = state
         .crypto
