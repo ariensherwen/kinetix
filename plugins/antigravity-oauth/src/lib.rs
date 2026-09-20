@@ -689,9 +689,188 @@ fn unsupported() -> PluginError {
     kinetix_plugin_sdk::helpers::error("unknown", "capability not provided by this plugin")
 }
 
+fn antigravity_models(cred: &Credential) -> Result<Vec<DiscoveredModel>, PluginError> {
+    let access = cred.access_token.as_deref().ok_or_else(|| {
+        kinetix_plugin_sdk::helpers::error("credential_expired", "no access token available")
+    })?;
+    let mut body = serde_json::Map::new();
+    if let Some(project) = cred.project_id.as_deref().filter(|value| !value.is_empty()) {
+        body.insert("project".into(), serde_json::Value::String(project.into()));
+    }
+
+    let req = HttpRequest {
+        method: "POST".into(),
+        url: MODELS_URL.into(),
+        headers: vec![
+            ("authorization".into(), format!("Bearer {access}")),
+            ("content-type".into(), "application/json".into()),
+            ("user-agent".into(), ANTIGRAVITY_USER_AGENT.into()),
+            ("x-client-name".into(), "antigravity".into()),
+            (
+                "x-client-version".into(),
+                ANTIGRAVITY_IDE_VERSION.into(),
+            ),
+            ("accept-encoding".into(), "gzip".into()),
+        ],
+        body: serde_json::to_vec(&serde_json::Value::Object(body)).unwrap_or_default(),
+        credential: None,
+    };
+    let resp = kinetix::plugin::host_http::send(&req)
+        .map_err(|e| kinetix_plugin_sdk::helpers::error(&e.code, e.message))?;
+    if resp.body_truncated {
+        return Err(kinetix_plugin_sdk::helpers::error(
+            "upstream_unavailable",
+            "Antigravity model response truncated",
+        ));
+    }
+    let text = String::from_utf8(resp.body).map_err(|_| {
+        kinetix_plugin_sdk::helpers::error(
+            "protocol_error",
+            "Antigravity model response is not utf-8",
+        )
+    })?;
+    if resp.status != 200 {
+        return Err(kinetix_plugin_sdk::helpers::error(
+            if resp.status == 401 || resp.status == 403 {
+                "credential_expired"
+            } else {
+                "upstream_unavailable"
+            },
+            format!(
+                "Antigravity model discovery returned HTTP {}: {}",
+                resp.status,
+                truncate(&text, 200)
+            ),
+        ));
+    }
+
+    let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+        kinetix_plugin_sdk::helpers::error(
+            "protocol_error",
+            format!("invalid Antigravity model JSON: {e}"),
+        )
+    })?;
+    let Some(models) = value.get("models") else {
+        return Err(kinetix_plugin_sdk::helpers::error(
+            "protocol_error",
+            "Antigravity model response is missing models",
+        ));
+    };
+
+    let mut out = Vec::new();
+    match models {
+        serde_json::Value::Object(entries) => {
+            for (id, info) in entries {
+                if info
+                    .get("isInternal")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
+                let display_name = info
+                    .get("displayName")
+                    .or_else(|| info.get("name"))
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string);
+                let context_window = info
+                    .get("contextWindow")
+                    .or_else(|| info.get("context_window"))
+                    .and_then(|value| value.as_u64());
+                let max_output_tokens = info
+                    .get("maxOutputTokens")
+                    .or_else(|| info.get("max_output_tokens"))
+                    .and_then(|value| value.as_u64());
+                let capabilities_json = info
+                    .get("capabilities")
+                    .filter(|value| !value.is_null())
+                    .map(|value| value.to_string());
+                out.push(DiscoveredModel {
+                    id: id.clone(),
+                    display_name,
+                    context_window,
+                    max_output_tokens,
+                    capabilities_json,
+                    raw_metadata: Some(info.to_string()),
+                });
+            }
+        }
+        serde_json::Value::Array(entries) => {
+            for info in entries {
+                let Some(id) = info
+                    .get("id")
+                    .or_else(|| info.get("model"))
+                    .or_else(|| info.get("name"))
+                    .and_then(|value| value.as_str())
+                else {
+                    continue;
+                };
+                out.push(DiscoveredModel {
+                    id: id.to_string(),
+                    display_name: info
+                        .get("displayName")
+                        .or_else(|| info.get("name"))
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string),
+                    context_window: info
+                        .get("contextWindow")
+                        .or_else(|| info.get("context_window"))
+                        .and_then(|value| value.as_u64()),
+                    max_output_tokens: info
+                        .get("maxOutputTokens")
+                        .or_else(|| info.get("max_output_tokens"))
+                        .and_then(|value| value.as_u64()),
+                    capabilities_json: info
+                        .get("capabilities")
+                        .filter(|value| !value.is_null())
+                        .map(|value| value.to_string()),
+                    raw_metadata: Some(info.to_string()),
+                });
+            }
+        }
+        _ => {}
+    }
+    out.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(out)
+}
+
 impl exports::model_source::Guest for Component {
-    fn discover(_p: String, _b: String, _m: String) -> Result<Vec<DiscoveredModel>, PluginError> {
-        Err(unsupported())
+    fn discover(
+        provider_id: String,
+        _base_url: String,
+        _models_path: String,
+    ) -> Result<Vec<DiscoveredModel>, PluginError> {
+        let named = CredentialRef::Named(format!("provider-default:{provider_id}"));
+        let raw = kinetix::plugin::host_credential::read(&named)
+            .map_err(|e| kinetix_plugin_sdk::helpers::error("credential_expired", e.message))?;
+        let mut cred = load_provider_credential(&provider_id, &raw);
+        let now = kinetix_plugin_sdk::helpers::now_unix_millis();
+        if !access_token_valid(&cred, now) {
+            refresh(&mut cred).map_err(|e| {
+                kinetix_plugin_sdk::helpers::retryable_error(
+                    "upstream_unavailable",
+                    e,
+                    Some(5),
+                )
+            })?;
+            persist_provider_credential(&provider_id, &cred);
+        }
+
+        match antigravity_models(&cred) {
+            Ok(models) => Ok(models),
+            Err(error) if error.code == "credential_expired" && cred.refresh_token.is_some() => {
+                refresh(&mut cred).map_err(|e| {
+                    kinetix_plugin_sdk::helpers::retryable_error(
+                        "upstream_unavailable",
+                        e,
+                        Some(5),
+                    )
+                })?;
+                persist_provider_credential(&provider_id, &cred);
+                antigravity_models(&cred)
+            }
+            Err(error) => Err(error),
+        }
     }
 }
 impl exports::health_probe::Guest for Component {
