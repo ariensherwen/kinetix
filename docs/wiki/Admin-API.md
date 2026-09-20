@@ -125,6 +125,8 @@ Manage WebAssembly Component plugins (`.kxp` packages).
 | --- | --- |
 | `GET /admin/api/plugins` | List all installed plugins with manifest summaries, status, and provided capabilities. |
 | `POST /admin/api/plugins/install` | Install or upgrade a `.kxp` package from `package_base64` or a server-local `path`. Accepts `sha256`, `trusted_keys` array, and `allow_untrusted_signature`. Plugins are installed disabled; the response includes the computed package SHA-256 and the exact package is retained in the content-addressed package store. |
+| `POST /admin/api/plugins/auth/start` | Start a named plugin account-auth flow for an existing provider binding. Requires admin auth; returns the provider authorization URL. |
+| `GET /admin/api/plugins/auth/callback` | One-time provider callback authenticated by the expiring random `state` token. Exchanges the code inside WASM, encrypts the returned credential JSON, creates the account, and redirects to the Plugins page. |
 | `GET /admin/api/plugins/{id}` | Plugin detail: manifest metadata, requested/approved permissions, runtime circuit state, and retained `.kxp` package provenance/history. |
 | `DELETE /admin/api/plugins/{id}` | Remove a plugin and cascade-delete its permissions, circuit state, and encrypted KV storage. |
 | `POST /admin/api/plugins/{id}/enable` | Enable an installed plugin. Verifies component linking and registers capabilities. |
