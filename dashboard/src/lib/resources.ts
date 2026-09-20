@@ -215,6 +215,17 @@ export interface PluginPermissionDiff {
   credential_read: PluginPermissionBoolDiff;
 }
 
+export interface PluginCatalogUpdatePreview {
+  id: string;
+  current_version: string;
+  target_version: string;
+  sha256: string;
+  signature: string;
+  permissions: PluginPermissions;
+  permission_diff: PluginPermissionDiff;
+  provides: PluginCapability[];
+}
+
 export interface PluginRollbackPreview {
   id: string;
   current_version: string;
@@ -376,6 +387,10 @@ export const Kinetix = {
   installCatalogPlugin: (id: string) =>
     api.post<PluginInstallResult>(
       `/admin/api/plugins/catalog/${encodeURIComponent(id)}/install`,
+    ),
+  previewCatalogPluginUpdate: (id: string) =>
+    api.post<PluginCatalogUpdatePreview>(
+      `/admin/api/plugins/catalog/${encodeURIComponent(id)}/preview`,
     ),
   plugin: (id: string) =>
     api.get<PluginDetail>(`/admin/api/plugins/${encodeURIComponent(id)}`),
