@@ -251,6 +251,12 @@ async fn removing_a_plugin_cascades_stored_state() {
             .unwrap(),
         0
     );
+    // Immutable package provenance is intentionally independent of active
+    // plugin state and survives uninstall.
+    let packages = kinetix::plugins::store::list_packages(&pool, "dev.example.foo")
+        .await
+        .unwrap();
+    assert_eq!(packages.len(), 1);
 }
 
 #[tokio::test]
