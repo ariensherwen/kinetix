@@ -1558,12 +1558,8 @@ impl PluginManager {
                     // sole half-open probe it also is not recovery evidence.
                     // Reopen for another cooldown instead of stranding the
                     // breaker in half_open forever.
-                    let _ = store::reopen_plugin_circuit(
-                        &self.inner.pool,
-                        id,
-                        CIRCUIT_OPEN_SECS,
-                    )
-                    .await;
+                    let _ =
+                        store::reopen_plugin_circuit(&self.inner.pool, id, CIRCUIT_OPEN_SECS).await;
                     return Err(PluginFault::Cancelled);
                 }
                 self.record_fault(id, &fault).await;
