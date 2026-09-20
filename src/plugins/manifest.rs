@@ -165,7 +165,10 @@ pub fn validate(manifest: Manifest, policy: HostPolicy) -> Result<ValidatedManif
         if setting.label.trim().is_empty() {
             bail!("ui setting '{}' label must not be empty", setting.key);
         }
-        if !matches!(setting.kind.as_str(), "text" | "secret" | "boolean" | "select") {
+        if !matches!(
+            setting.kind.as_str(),
+            "text" | "secret" | "boolean" | "select"
+        ) {
             bail!(
                 "ui setting '{}' has unsupported kind '{}'",
                 setting.key,
@@ -179,7 +182,10 @@ pub fn validate(manifest: Manifest, policy: HostPolicy) -> Result<ValidatedManif
             let mut options = std::collections::HashSet::new();
             for option in &setting.options {
                 if option.is_empty() || !options.insert(option.as_str()) {
-                    bail!("ui setting '{}' has invalid or duplicate option", setting.key);
+                    bail!(
+                        "ui setting '{}' has invalid or duplicate option",
+                        setting.key
+                    );
                 }
             }
             if let Some(default) = &setting.default {
@@ -208,7 +214,10 @@ pub fn validate(manifest: Manifest, policy: HostPolicy) -> Result<ValidatedManif
             }
         }
         if setting.kind == "secret" && setting.default.is_some() {
-            bail!("secret ui setting '{}' may not declare a default", setting.key);
+            bail!(
+                "secret ui setting '{}' may not declare a default",
+                setting.key
+            );
         }
     }
 
