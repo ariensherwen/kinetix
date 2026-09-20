@@ -125,6 +125,7 @@ Manage WebAssembly Component plugins (`.kxp` packages).
 | --- | --- |
 | `GET /admin/api/plugins` | List all installed plugins with manifest summaries, status, and provided capabilities. |
 | `GET /admin/api/plugins/catalog` | Return embedded official discovery metadata. Catalog metadata does not bypass package signature/hash/permission review. |
+| `POST /admin/api/plugins/catalog/{id}/preview` | Verify the trusted catalog target without installing it and return the semantic permission delta against the active plugin manifest. |
 | `POST /admin/api/plugins/catalog/{id}/install` | Download and install an install-ready catalog package. Kinetix constrains HTTPS redirect hosts, package size, SHA-256, catalog id/version, and requires a signature from the separately trusted publisher key. Installs disabled. |
 | `POST /admin/api/plugins/install` | Install or upgrade a `.kxp` package from `package_base64` or a server-local `path`. Accepts `sha256`, `trusted_keys` array, and `allow_untrusted_signature`. Plugins are installed disabled; the response includes the computed SHA-256 and the exact package is retained in the content-addressed package store. |
 | `POST /admin/api/plugins/auth/start` | Start a named plugin browser-account flow for an existing provider binding. Requires admin auth and returns the provider authorization URL. |
