@@ -136,9 +136,11 @@ pub struct HostCtx {
     pub max_http_body: u64,
     /// Whether the plugin may open the streaming adapter transport (§7.1).
     pub adapter_stream: bool,
-    /// Whether routing facts must be pure (no outbound HTTP on the request
-    /// path, §6.4). Set from the manifest's `routing_facts_mode`.
-    pub routing_facts_pure: bool,
+    /// Whether this specific invocation may use buffered host-http. Authority
+    /// is capability-scoped by the manager: routing-fact request-path calls and
+    /// provider-adapter calls set this to false even when the plugin has approved
+    /// network hosts.
+    pub buffered_http_allowed: bool,
     /// Outbound request counter for the current invocation.
     pub outbound_count: u32,
     /// The HTTP client used for host-mediated outbound requests.
@@ -335,15 +337,10 @@ impl bindings::kinetix::plugin::host_http::Host for HostCtx {
         &mut self,
         req: wit::types::HttpRequest,
     ) -> anyhow::Result<Result<wit::types::HttpResponse, wit::types::PluginError>> {
-        // The buffered host-http is control-plane only: the adapter transport
-        // is a separate streaming capability (§7.1). A `pure` routing-fact
-        // plugin is also refused outbound HTTP so Routes stay deterministic
-        // (§6.4). NOTE: an adapter plugin is NOT refused here when it also
-        // legitimately imports the `plugin` world (e.g. a credential strategy
-        // that refreshes a token) — adapters import no network capability of
-        // their own, and the manifest forbids network_hosts for adapter-only
-        // plugins. For an adapter-world store the buffered HTTP is refused.
-        if self.routing_facts_pure {
+        // Buffered host-http is control-plane only. Authority is scoped per
+        // invocation by the manager, so request-path routing facts and
+        // adapter-world calls are denied even when approved network hosts exist.
+        if !self.buffered_http_allowed {
             return Ok(Err(err(
                 "permission_denied",
                 "buffered host-http is not available to this plugin capability",
@@ -709,7 +706,7 @@ mod tests {
             max_outbound_requests: 1,
             max_http_body: 1024,
             adapter_stream: false,
-            routing_facts_pure: true,
+            buffered_http_allowed: false,
             outbound_count: 0,
             http: reqwest::Client::new(),
             backing: std::sync::Arc::new(NoBacking),
@@ -721,6 +718,53 @@ mod tests {
             result.is_err(),
             "an empty component must not satisfy the world"
         );
+    }
+
+    fn test_ctx(buffered_http_allowed: bool, network_hosts: Vec<String>) -> HostCtx {
+        HostCtx {
+            plugin_id: "test".into(),
+            network_hosts,
+            credential_read: false,
+            credential_sign: false,
+            credential_scopes: vec![],
+            storage_quota: 1024,
+            max_outbound_requests: 1,
+            max_http_body: 1024,
+            adapter_stream: false,
+            buffered_http_allowed,
+            outbound_count: 0,
+            http: reqwest::Client::new(),
+            backing: std::sync::Arc::new(NoBacking),
+            limits: wasmtime::StoreLimitsBuilder::new().build(),
+        }
+    }
+
+    #[tokio::test]
+    async fn buffered_http_is_scoped_to_the_current_capability() {
+        use bindings::kinetix::plugin::host_http::Host;
+
+        let req = wit::types::HttpRequest {
+            method: "GET".into(),
+            url: "https://oauth2.googleapis.com/token".into(),
+            headers: vec![],
+            body: vec![],
+            credential: None,
+        };
+
+        let mut denied = test_ctx(false, vec!["oauth2.googleapis.com".into()]);
+        let err = denied.send(req.clone()).await.unwrap().unwrap_err();
+        assert_eq!(err.code, "permission_denied");
+        assert!(
+            err.message
+                .contains("not available to this plugin capability")
+        );
+
+        // With capability-level HTTP enabled, the request advances to the
+        // manifest host allow-list instead of being rejected by capability policy.
+        let mut allowed_capability = test_ctx(true, vec!["api.example.com".into()]);
+        let err = allowed_capability.send(req).await.unwrap().unwrap_err();
+        assert_eq!(err.code, "permission_denied");
+        assert!(err.message.contains("network_hosts"));
     }
 
     struct NoBacking;
