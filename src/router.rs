@@ -128,6 +128,10 @@ pub fn build(state: AppState) -> Router {
         .route("/plugins", get(admin::list_plugins))
         .route("/plugins/catalog", get(admin::plugin_catalog))
         .route(
+            "/plugins/catalog/{id}/preview",
+            get(admin::preview_catalog_plugin),
+        )
+        .route(
             "/plugins/catalog/{id}/install",
             post(admin::install_catalog_plugin),
         )
