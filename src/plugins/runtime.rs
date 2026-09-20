@@ -56,6 +56,9 @@ pub use bindings::kinetix::plugin as wit;
 /// Reserved KV namespace for cached routing facts (§6.4). Values written here
 /// are host-stamped with `observed_at`/`max_age_ms`.
 pub const CACHE_PREFIX: &str = "_cache:";
+/// Reserved host-owned plugin configuration namespace. Guests may read values
+/// through host-storage but may not write or delete them.
+pub const CONFIG_PREFIX: &str = "_config:";
 
 /// Errors that terminate or fail a plugin invocation.
 #[derive(Debug, Clone)]
@@ -520,6 +523,9 @@ impl bindings::kinetix::plugin::host_storage::Host for HostCtx {
     }
 
     async fn put(&mut self, key: String, value: Vec<u8>) -> anyhow::Result<Result<(), String>> {
+        if key.starts_with(CONFIG_PREFIX) {
+            return Ok(Err("host-owned config namespace is read-only".into()));
+        }
         let used = self
             .backing
             .kv_get(&self.plugin_id, "")
@@ -538,6 +544,9 @@ impl bindings::kinetix::plugin::host_storage::Host for HostCtx {
     }
 
     async fn delete(&mut self, key: String) -> anyhow::Result<Result<(), String>> {
+        if key.starts_with(CONFIG_PREFIX) {
+            return Ok(Err("host-owned config namespace is read-only".into()));
+        }
         match self.backing.kv_delete(&self.plugin_id, &key).await {
             Ok(()) => Ok(Ok(())),
             Err(e) => Ok(Err(format!("storage delete failed: {e}"))),
