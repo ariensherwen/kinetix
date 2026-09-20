@@ -17,6 +17,7 @@ import {
 import {
   Kinetix,
   PluginCatalogEntry,
+  PluginCatalogUpdatePreview,
   PluginDetail,
   PluginPermissionResponse,
   PluginRollbackPreview,
@@ -83,6 +84,8 @@ export const PluginsView: React.FC = () => {
   const [settings, setSettings] = useState<PluginSettingState[]>([]);
   const [settingDrafts, setSettingDrafts] = useState<Record<string, string | boolean>>({});
   const [rollbackPreview, setRollbackPreview] = useState<PluginRollbackPreview | null>(null);
+  const [catalogUpdatePreview, setCatalogUpdatePreview] =
+    useState<PluginCatalogUpdatePreview | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -311,6 +314,40 @@ export const PluginsView: React.FC = () => {
         `Rolled back to v${target.target_version}. Review permissions before enabling.`,
       );
       await refresh(selectedId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const reviewCatalogUpdate = async (entry: PluginCatalogEntry) => {
+    setBusy(`catalog-preview:${entry.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      const preview = await Kinetix.previewCatalogPluginUpdate(entry.id);
+      setCatalogUpdatePreview(preview);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const confirmCatalogUpdate = async () => {
+    if (!catalogUpdatePreview) return;
+    const target = catalogUpdatePreview;
+    setBusy(`catalog:${target.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      const outcome = await Kinetix.installCatalogPlugin(target.id);
+      setCatalogUpdatePreview(null);
+      setNotice(
+        `Updated ${outcome.id} to v${outcome.version}. Review permissions before enabling it.`,
+      );
+      await refresh(outcome.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -584,19 +621,29 @@ export const PluginsView: React.FC = () => {
                     {installed?.version === entry.latest_version ? (
                       <SketchBadge variant="green">Current</SketchBadge>
                     ) : entry.install_ready ? (
-                      <SketchButton
-                        variant="primary"
-                        className="gap-2"
-                        disabled={busy !== null}
-                        onClick={() => void installFromCatalog(entry)}
-                      >
-                        <PackagePlus className="w-4 h-4" />
-                        {busy === `catalog:${entry.id}`
-                          ? 'Installing…'
-                          : installed
-                            ? `Update to v${entry.latest_version}`
-                            : 'Install'}
-                      </SketchButton>
+                      installed ? (
+                        <SketchButton
+                          variant="primary"
+                          className="gap-2"
+                          disabled={busy !== null}
+                          onClick={() => void reviewCatalogUpdate(entry)}
+                        >
+                          <PackagePlus className="w-4 h-4" />
+                          {busy === `catalog-preview:${entry.id}`
+                            ? 'Reviewing…'
+                            : `Review update to v${entry.latest_version}`}
+                        </SketchButton>
+                      ) : (
+                        <SketchButton
+                          variant="primary"
+                          className="gap-2"
+                          disabled={busy !== null}
+                          onClick={() => void installFromCatalog(entry)}
+                        >
+                          <PackagePlus className="w-4 h-4" />
+                          {busy === `catalog:${entry.id}` ? 'Installing…' : 'Install'}
+                        </SketchButton>
+                      )
                     ) : (
                       <SketchBadge variant="yellow">
                         {entry.trust_status === 'unavailable'
@@ -605,6 +652,93 @@ export const PluginsView: React.FC = () => {
                       </SketchBadge>
                     )}
                   </div>
+
+                  {catalogUpdatePreview?.id === entry.id && (
+                    <div className="mt-4 p-3 border-2 border-[var(--ink)]/25 bg-[var(--erased)]/40">
+                      <div className="flex items-start justify-between gap-3 flex-wrap">
+                        <div>
+                          <div className="font-heading font-bold">
+                            Update review: v{catalogUpdatePreview.current_version} → v{catalogUpdatePreview.target_version}
+                          </div>
+                          <div className="mt-1 text-xs font-mono text-[var(--ink)]/55 break-all">
+                            SHA-256 {catalogUpdatePreview.sha256}
+                          </div>
+                        </div>
+                        <SketchBadge variant="green">{catalogUpdatePreview.signature}</SketchBadge>
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <div className="text-xs font-heading font-bold mb-1">Network hosts</div>
+                          {catalogUpdatePreview.permission_diff.network_hosts.added.length === 0 &&
+                          catalogUpdatePreview.permission_diff.network_hosts.removed.length === 0 ? (
+                            <div className="text-xs font-mono text-[var(--ink)]/55">No change</div>
+                          ) : (
+                            <div className="space-y-1 text-xs font-mono">
+                              {catalogUpdatePreview.permission_diff.network_hosts.added.map((value) => (
+                                <div key={`catalog-host-add-${value}`}>+ {value}</div>
+                              ))}
+                              {catalogUpdatePreview.permission_diff.network_hosts.removed.map((value) => (
+                                <div key={`catalog-host-remove-${value}`}>− {value}</div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div>
+                          <div className="text-xs font-heading font-bold mb-1">Credential scopes</div>
+                          {catalogUpdatePreview.permission_diff.credential_scopes.added.length === 0 &&
+                          catalogUpdatePreview.permission_diff.credential_scopes.removed.length === 0 ? (
+                            <div className="text-xs font-mono text-[var(--ink)]/55">No change</div>
+                          ) : (
+                            <div className="space-y-1 text-xs font-mono">
+                              {catalogUpdatePreview.permission_diff.credential_scopes.added.map((value) => (
+                                <div key={`catalog-scope-add-${value}`}>+ {value}</div>
+                              ))}
+                              {catalogUpdatePreview.permission_diff.credential_scopes.removed.map((value) => (
+                                <div key={`catalog-scope-remove-${value}`}>− {value}</div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="mt-3 text-xs font-body text-[var(--ink)]/70">
+                        Plaintext credential access:{' '}
+                        <strong>
+                          {catalogUpdatePreview.permission_diff.credential_read.changed
+                            ? `${catalogUpdatePreview.permission_diff.credential_read.from ? 'enabled' : 'disabled'} → ${catalogUpdatePreview.permission_diff.credential_read.to ? 'enabled' : 'disabled'}`
+                            : catalogUpdatePreview.permission_diff.credential_read.to
+                              ? 'enabled (unchanged)'
+                              : 'disabled (unchanged)'}
+                        </strong>
+                      </div>
+
+                      <div className="mt-3 text-xs font-body text-[var(--ink)]/70">
+                        Applying the update disables the plugin and clears all approved permissions,
+                        even when the authority diff is empty.
+                      </div>
+
+                      <div className="mt-3 flex gap-2 flex-wrap">
+                        <SketchButton
+                          variant="primary"
+                          disabled={busy !== null}
+                          onClick={() => void confirmCatalogUpdate()}
+                        >
+                          {busy === `catalog:${entry.id}`
+                            ? 'Updating…'
+                            : `Confirm update to v${catalogUpdatePreview.target_version}`}
+                        </SketchButton>
+                        <SketchButton
+                          variant="secondary"
+                          disabled={busy !== null}
+                          onClick={() => setCatalogUpdatePreview(null)}
+                        >
+                          Cancel
+                        </SketchButton>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
