@@ -550,6 +550,17 @@ mod tests {
         let url = format!("sqlite://{}?mode=rwc", dir.join("t.db").display());
         let pool = crate::db::connect(&url).await.unwrap();
         crate::db::migrate(&pool).await.unwrap();
+        let now = crate::db::now_iso();
+        sqlx::query(
+            "INSERT INTO plugins
+             (id, version, plugin_api_major, package_sha256, enabled, signature, manifest_json, component, installed_at, updated_at)
+             VALUES ('p', '1.0.0', 1, 'test-sha', 0, 'unsigned', '{}', X'', ?, ?)",
+        )
+        .bind(&now)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .unwrap();
         (pool, Arc::new(Crypto::new(&[23_u8; 32])), dir)
     }
 
