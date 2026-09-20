@@ -232,6 +232,20 @@ The browser never receives access or refresh tokens from Kinetix. Provider
 client constraints remain plugin-specific: for example, the bundled
 Antigravity desktop OAuth client supports loopback callbacks only.
 
+### 6.0.3 Declarative dashboard actions
+
+Plugins may declare host-rendered `[[ui.actions]]` metadata. Actions never load
+plugin JavaScript into the dashboard origin. Instead, the dashboard renders a
+Kinetix-owned control and dispatches an operation that the host already
+authorizes.
+
+The initial `auth` action kind references an integration id. The referenced
+integration must provide both an `auth_flow` and a `credential_strategy`.
+This keeps UX composition in the manifest while CSRF/PKCE, permissions,
+credential persistence, and browser authority remain host-owned.
+
+Custom executable plugin UI remains out of scope for this version.
+
 ### 6.1 CredentialStrategy
 
 Purpose:
