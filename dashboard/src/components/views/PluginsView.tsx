@@ -471,6 +471,27 @@ export const PluginsView: React.FC = () => {
                 </WobblyCard>
               </div>
 
+              {detail?.packages && detail.packages.length > 0 && (
+                <WobblyCard variant="muted" className="p-5">
+                  <h4 className="text-lg font-heading font-bold mb-3">Retained packages</h4>
+                  <div className="space-y-2">
+                    {detail.packages.map((pkg) => (
+                      <div
+                        key={pkg.package_sha256}
+                        className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 border-b border-dashed border-[var(--ink)]/20 pb-2"
+                      >
+                        <SketchBadge variant={pkg.package_sha256 === selected.sha256 ? 'green' : 'default'}>
+                          v{pkg.version}
+                        </SketchBadge>
+                        <code className="text-xs break-all self-center">{pkg.package_sha256}</code>
+                        <span className="text-xs text-[var(--ink)]/55">Stored package</span>
+                        <code className="text-xs text-[var(--ink)]/55 break-all">{pkg.package_path}</code>
+                      </div>
+                    ))}
+                  </div>
+                </WobblyCard>
+              )}
+
               <WobblyCard decoration="tape" className="p-5">
                 <div className="flex flex-col md:flex-row md:items-start gap-4">
                   <div className="flex-1">
