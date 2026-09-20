@@ -504,6 +504,7 @@ impl PluginManager {
             version: row.version.clone(),
             plugin_api: "1".into(),
             provides: Default::default(),
+            integrations: Default::default(),
             permissions: Default::default(),
             limits: Limits::default(),
             routing_facts_mode: "pure".into(),
@@ -1214,6 +1215,7 @@ pub fn manifest_summary(row: &PluginRow) -> serde_json::Value {
         "signature": row.signature,
         "status": row.status().as_str(),
         "provides": manifest.as_ref().map(|m| m.provides.provided()).unwrap_or_default(),
+        "integrations": manifest.as_ref().map(|m| m.integrations.clone()).unwrap_or_default(),
         "permissions": manifest.as_ref().map(|m| m.permissions.clone()).unwrap_or_default(),
         "limits": manifest.as_ref().map(|m| m.limits.clone()).unwrap_or_default(),
     })
