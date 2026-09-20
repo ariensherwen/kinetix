@@ -5,6 +5,7 @@
 //! Wasmtime for request-path work, and it always maps guest results into typed
 //! evidence that core policy consumes.
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -90,6 +91,7 @@ struct Inner {
     backing: Arc<Backing>,
     http: reqwest::Client,
     policy: HostPolicy,
+    package_root: PathBuf,
     semaphore: Semaphore,
     /// Simple counters for the admin metrics surface (§18).
     invocations: std::sync::atomic::AtomicU64,
@@ -105,7 +107,14 @@ impl PluginManager {
         crypto: Arc<Crypto>,
         http: reqwest::Client,
         policy: HostPolicy,
+        package_root: PathBuf,
     ) -> Result<Self> {
+        std::fs::create_dir_all(&package_root).map_err(|e| {
+            anyhow!(
+                "creating plugin package store {}: {e}",
+                package_root.display()
+            )
+        })?;
         let runtime = PluginRuntime::new()?;
         let backing = Arc::new(Backing {
             pool: pool.clone(),
@@ -119,6 +128,7 @@ impl PluginManager {
                 backing,
                 http,
                 policy,
+                package_root,
                 semaphore: Semaphore::new(MAX_CONCURRENT_INVOCATIONS),
                 invocations: Default::default(),
                 faults: Default::default(),
@@ -178,6 +188,13 @@ impl PluginManager {
             .compile(&pkg.component)
             .map_err(|e| anyhow!("{e}"))?;
 
+        // Preserve the exact accepted package before publishing its active
+        // metadata. The filename is content-addressed so the version string
+        // never becomes a filesystem path component.
+        let package_path = self
+            .persist_package(&validated.manifest.id, &pkg.package_sha256, bytes)
+            .await?;
+
         // Installation and upgrade never grant authority. The operator must
         // explicitly approve the declared permission set before enablement.
         store::upsert_plugin(
@@ -186,15 +203,79 @@ impl PluginManager {
             &pkg.package_sha256,
             &pkg.component,
             sig.as_str(),
+            &package_path,
         )
         .await?;
 
         Ok(InstallOutcome {
             id: validated.manifest.id.clone(),
             version: validated.manifest.version.clone(),
+            package_sha256: pkg.package_sha256,
             signature: sig,
             provides: validated.manifest.provides.provided(),
         })
+    }
+
+    async fn persist_package(&self, plugin_id: &str, sha256: &str, bytes: &[u8]) -> Result<String> {
+        let relative = PathBuf::from(plugin_id).join(format!("{sha256}.kxp"));
+        let target = self.inner.package_root.join(&relative);
+        let parent = target
+            .parent()
+            .ok_or_else(|| anyhow!("plugin package path has no parent"))?;
+
+        tokio::fs::create_dir_all(parent).await.map_err(|e| {
+            anyhow!(
+                "creating plugin package directory {}: {e}",
+                parent.display()
+            )
+        })?;
+
+        match tokio::fs::read(&target).await {
+            Ok(existing) => {
+                if existing != bytes {
+                    bail!(
+                        "plugin package store collision at {} for SHA-256 {}",
+                        target.display(),
+                        sha256
+                    );
+                }
+                return Ok(relative.to_string_lossy().into_owned());
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(anyhow!(
+                    "reading existing plugin package {}: {e}",
+                    target.display()
+                ));
+            }
+        }
+
+        let temp = target.with_extension(format!("kxp.tmp-{}", uuid::Uuid::new_v4().simple()));
+        tokio::fs::write(&temp, bytes)
+            .await
+            .map_err(|e| anyhow!("writing plugin package {}: {e}", temp.display()))?;
+
+        if let Err(rename_err) = tokio::fs::rename(&temp, &target).await {
+            match tokio::fs::read(&target).await {
+                Ok(existing) if existing == bytes => {
+                    let _ = tokio::fs::remove_file(&temp).await;
+                }
+                _ => {
+                    let _ = tokio::fs::remove_file(&temp).await;
+                    return Err(anyhow!(
+                        "publishing plugin package {}: {rename_err}",
+                        target.display()
+                    ));
+                }
+            }
+        }
+
+        Ok(relative.to_string_lossy().into_owned())
+    }
+
+    /// Root of the immutable package cache.
+    pub fn package_root(&self) -> &Path {
+        &self.inner.package_root
     }
 
     /// Install from a local file path. The computed SHA-256 is recorded (§11).
@@ -1090,6 +1171,7 @@ pub struct PluginCounters {
 pub struct InstallOutcome {
     pub id: String,
     pub version: String,
+    pub package_sha256: String,
     pub signature: SignatureStatus,
     pub provides: Vec<Provided>,
 }
