@@ -235,6 +235,28 @@ world plugin-auth {
   }
 }
 
+/// Account-aware model discovery world. Kept separate from `plugin` so API-v1
+/// components using the legacy unauthenticated `model-source` export remain
+/// loadable. Core supplies an explicit account reference; host credential
+/// policy still decides whether the guest may use it.
+world plugin-model-source {
+  import host-http;
+  import host-storage;
+  import host-log;
+  import host-credential;
+  import host-clock;
+
+  export account-model-source: interface {
+    use types.{plugin-error, discovered-model, account-ref};
+    discover: func(
+      provider-id: string,
+      account: account-ref,
+      base-url: string,
+      models-path: string
+    ) -> result<list<discovered-model>, plugin-error>;
+  }
+}
+
 /// Adapter world (§6.3, §7.1): a separate world so the buffered host-http above
 /// can never be used as the adapter transport. Streaming is a host capability
 /// added in a later revision without changing this world's exports.
