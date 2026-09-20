@@ -170,6 +170,76 @@ async fn upgrade_disables_plugin_and_clears_previous_approvals() {
 }
 
 #[tokio::test]
+async fn rollback_revalidates_retained_package_and_clears_authority() {
+    let (m, pool) = manager().await;
+    let original = build_kxp(GOOD_MANIFEST, EMPTY_COMPONENT);
+    let original_outcome = m.install(&original, None, &[], false).await.unwrap();
+
+    let upgraded = GOOD_MANIFEST.replace("version = \"1.2.0\"", "version = \"1.3.0\"");
+    let upgraded_kxp = build_kxp(&upgraded, EMPTY_COMPONENT);
+    m.install(&upgraded_kxp, None, &[], false).await.unwrap();
+    m.approve_permissions("dev.example.foo").await.unwrap();
+    kinetix::plugins::store::set_enabled(&pool, "dev.example.foo", true)
+        .await
+        .unwrap();
+
+    let rolled_back = m
+        .rollback("dev.example.foo", &original_outcome.package_sha256)
+        .await
+        .unwrap();
+    assert_eq!(rolled_back.version, "1.2.0");
+
+    let row = m.get("dev.example.foo").await.unwrap().unwrap();
+    assert_eq!(row.version, "1.2.0");
+    assert_eq!(row.package_sha256, original_outcome.package_sha256);
+    assert_eq!(row.enabled, 0);
+    assert!(
+        kinetix::plugins::store::permissions(&pool, "dev.example.foo")
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn rollback_rejects_tampered_retained_package() {
+    let (m, _pool) = manager().await;
+    let original = build_kxp(GOOD_MANIFEST, EMPTY_COMPONENT);
+    let original_outcome = m.install(&original, None, &[], false).await.unwrap();
+
+    let upgraded = GOOD_MANIFEST.replace("version = \"1.2.0\"", "version = \"1.3.0\"");
+    m.install(&build_kxp(&upgraded, EMPTY_COMPONENT), None, &[], false)
+        .await
+        .unwrap();
+
+    let retained = kinetix::plugins::store::get_package(
+        &m.get("dev.example.foo").await.unwrap().map(|_| ()).and(Some(_pool.clone())).unwrap_or(_pool.clone()),
+        "dev.example.foo",
+        &original_outcome.package_sha256,
+    )
+    .await;
+
+    // Fetch the provenance from the manager's backing database through a fresh
+    // lookup helper below; the retained file is then corrupted without touching
+    // the provenance hash.
+    drop(retained);
+    let packages = kinetix::plugins::store::list_packages(&_pool, "dev.example.foo")
+        .await
+        .unwrap();
+    let package = packages
+        .iter()
+        .find(|package| package.package_sha256 == original_outcome.package_sha256)
+        .unwrap();
+    std::fs::write(m.package_root().join(&package.package_path), b"tampered").unwrap();
+
+    let err = m
+        .rollback("dev.example.foo", &original_outcome.package_sha256)
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("hash mismatch"), "{err}");
+}
+
+#[tokio::test]
 async fn revoking_a_permission_disables_the_plugin() {
     let (m, pool) = manager().await;
     let kxp = build_kxp(GOOD_MANIFEST, EMPTY_COMPONENT);
