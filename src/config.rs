@@ -474,7 +474,7 @@ fn default_wildcard() -> Vec<String> {
 pub struct BootstrapProvider {
     pub name: String,
     pub base_url: String,
-    /// `openai` | `anthropic` | `gemini`
+    /// `openai` | `anthropic` | `gemini` | `plugin`
     pub wire_format: String,
     /// `bearer` | `custom_header` | `query_param`
     #[serde(default = "default_bearer")]
