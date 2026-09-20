@@ -15,6 +15,9 @@ pub enum WireFormat {
     Openai,
     Anthropic,
     Gemini,
+    /// Host-owned sentinel for providers whose actual wire translation is
+    /// supplied by `wire_plugin`. It has no native adapter.
+    Plugin,
 }
 
 impl WireFormat {
@@ -23,6 +26,7 @@ impl WireFormat {
             WireFormat::Openai => "openai",
             WireFormat::Anthropic => "anthropic",
             WireFormat::Gemini => "gemini",
+            WireFormat::Plugin => "plugin",
         }
     }
     pub fn parse(s: &str) -> Option<Self> {
@@ -30,6 +34,7 @@ impl WireFormat {
             "openai" => Some(WireFormat::Openai),
             "anthropic" => Some(WireFormat::Anthropic),
             "gemini" => Some(WireFormat::Gemini),
+            "plugin" => Some(WireFormat::Plugin),
             _ => None,
         }
     }
