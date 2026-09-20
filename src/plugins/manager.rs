@@ -829,6 +829,8 @@ impl PluginManager {
             max_http_body: limits.max_http_body,
             adapter_stream: adapter,
             buffered_http_allowed,
+            allow_private_network: self.inner.policy.allow_private_network,
+            http_timeout: Duration::from_millis(limits.wall_time_ms.max(1)),
             outbound_count: 0,
             http: self.inner.http.clone(),
             backing: self.inner.backing.clone(),
