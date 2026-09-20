@@ -181,11 +181,32 @@ pub struct UiAction {
     pub description: String,
 }
 
+/// A host-owned plugin setting rendered by the dashboard. Values are stored
+/// encrypted under the reserved `_config:` plugin-KV namespace. Guests may
+/// read that namespace but cannot mutate it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiSetting {
+    pub key: String,
+    pub label: String,
+    /// text | secret | boolean | select
+    pub kind: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default)]
+    pub options: Vec<String>,
+    #[serde(default)]
+    pub default: Option<String>,
+}
+
 /// Declarative dashboard metadata. Empty by default for backward compatibility.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PluginUi {
     #[serde(default)]
     pub actions: Vec<UiAction>,
+    #[serde(default)]
+    pub settings: Vec<UiSetting>,
 }
 
 /// A parsed `plugin.toml` (§5).
