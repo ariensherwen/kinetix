@@ -515,10 +515,7 @@ storage = "2MiB"
 
     #[test]
     fn rejects_integration_referencing_missing_auth_flow() {
-        let bad = GOOD.replace(
-            "auth_flow = \"foo-login\"",
-            "auth_flow = \"missing-login\"",
-        );
+        let bad = GOOD.replace("auth_flow = \"foo-login\"", "auth_flow = \"missing-login\"");
         let err = parse_and_validate(&bad, HostPolicy::default()).unwrap_err();
         assert!(
             err.to_string()
