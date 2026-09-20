@@ -207,6 +207,9 @@ mod tests {
         let problems =
             validate_provider_schema("n", "https://x/v1", "openai", "bearer", None, None);
         assert!(problems.is_empty());
+        let problems =
+            validate_provider_schema("n", "https://x/v1", "plugin", "bearer", None, None);
+        assert!(problems.is_empty());
     }
 
     #[test]
