@@ -525,6 +525,105 @@ pub async fn kv_put_limited(
     }
 }
 
+/// Atomically replace every KV entry under `prefix` while enforcing the
+/// plugin's plaintext storage quota. Keys outside the prefix are preserved.
+///
+/// This is used for cached routing-fact snapshots so a successful refresh
+/// cannot leave keys from an older snapshot behind, and a failed/quota-exceeded
+/// refresh leaves the previous snapshot intact.
+pub async fn kv_replace_prefix_limited(
+    pool: &Pool,
+    crypto: &Crypto,
+    plugin_id: &str,
+    prefix: &str,
+    entries: &[(String, Vec<u8>)],
+    quota: u64,
+) -> Result<()> {
+    if prefix.is_empty() {
+        bail!("KV snapshot prefix must not be empty");
+    }
+    if entries.iter().any(|(key, _)| !key.starts_with(prefix)) {
+        bail!("KV snapshot entry is outside the requested prefix");
+    }
+
+    let mut encoded_entries = Vec::with_capacity(entries.len());
+    for (key, value) in entries {
+        let plaintext = base64::engine::general_purpose::STANDARD.encode(value);
+        let encrypted = crypto.encrypt_kv(&plaintext)?;
+        encoded_entries.push((key.clone(), encrypted, value.len() as u64));
+    }
+
+    let mut conn = pool.acquire().await?;
+    sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
+
+    let result: Result<()> = async {
+        let rows = sqlx::query("SELECT key, value FROM plugin_kv WHERE plugin_id = ?")
+            .bind(plugin_id)
+            .fetch_all(&mut *conn)
+            .await?;
+
+        let mut used = 0_u64;
+        for row in rows {
+            let existing_key: String = row.get("key");
+            if existing_key.starts_with(prefix) {
+                continue;
+            }
+            let encrypted: Vec<u8> = row.get("value");
+            let encrypted =
+                String::from_utf8(encrypted).context("plugin KV ciphertext not utf-8")?;
+            let encoded = crypto.decrypt_kv(&encrypted)?;
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(encoded.trim())
+                .context("plugin KV plaintext not base64")?;
+            used = used
+                .checked_add(decoded.len() as u64)
+                .context("plugin KV usage overflow")?;
+        }
+
+        for (_, _, len) in &encoded_entries {
+            used = used
+                .checked_add(*len)
+                .context("plugin KV usage overflow")?;
+        }
+        if used > quota {
+            bail!("storage quota exceeded: projected {used} bytes exceeds {quota} bytes");
+        }
+
+        sqlx::query("DELETE FROM plugin_kv WHERE plugin_id = ? AND key LIKE ?")
+            .bind(plugin_id)
+            .bind(format!("{prefix}%"))
+            .execute(&mut *conn)
+            .await?;
+
+        let now = crate::db::now_iso();
+        for (key, encrypted, _) in &encoded_entries {
+            sqlx::query(
+                "INSERT INTO plugin_kv (plugin_id, key, value, updated_at) VALUES (?,?,?,?)
+                 ON CONFLICT(plugin_id, key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+            )
+            .bind(plugin_id)
+            .bind(key)
+            .bind(encrypted.as_bytes())
+            .bind(&now)
+            .execute(&mut *conn)
+            .await?;
+        }
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => {
+            sqlx::query("COMMIT").execute(&mut *conn).await?;
+            Ok(())
+        }
+        Err(error) => {
+            let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+            Err(error)
+        }
+    }
+}
+
 pub async fn kv_get(
     pool: &Pool,
     crypto: &Crypto,
