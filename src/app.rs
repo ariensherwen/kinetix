@@ -61,6 +61,8 @@ pub struct AppState {
     pub ip_limiter: crate::ratelimit::IpLimiter,
     /// In-memory admin sessions (dropped on restart; TTL-bounded).
     pub sessions: Arc<crate::auth::Sessions>,
+    /// One-time browser sessions for plugin-provided OAuth/account flows.
+    pub plugin_auth_sessions: Arc<crate::auth::PluginAuthSessions>,
     /// Post-v1 plugin host (docs/KINETIX-PLUGIN-ARCHITECTURE.md).
     pub plugins: Option<Arc<crate::plugins::PluginManager>>,
     /// Bounded fire-and-forget queue for plugin hook side effects (§6.6). Hooks
@@ -93,6 +95,7 @@ impl AppState {
     ) -> Self {
         let credentials = Arc::new(StaticKeyStrategy::new(crypto.clone()));
         let sessions = Arc::new(crate::auth::Sessions::new(config.session_ttl_minutes));
+        let plugin_auth_sessions = Arc::new(crate::auth::PluginAuthSessions::new());
         let (hook_tx, mut hook_rx) = tokio::sync::mpsc::channel::<HookJob>(1024);
         tokio::spawn(async move {
             while let Some(job) = hook_rx.recv().await {
@@ -126,6 +129,7 @@ impl AppState {
             last_backup_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             ip_limiter: crate::ratelimit::IpLimiter::new(config_ip_limit),
             sessions,
+            plugin_auth_sessions,
             plugins: None,
             hook_tx,
         }
