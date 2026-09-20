@@ -61,6 +61,15 @@ export interface PluginCapability {
   name: string;
 }
 
+export interface PluginIntegration {
+  id: string;
+  name: string;
+  description: string;
+  provider_adapter?: string | null;
+  credential_strategy?: string | null;
+  model_source?: string | null;
+}
+
 export interface PluginPermissions {
   network_hosts: string[];
   credential_scopes: string[];
@@ -84,6 +93,7 @@ export interface PluginSummary {
   signature: string;
   status: string;
   provides: PluginCapability[];
+  integrations: PluginIntegration[];
   permissions: PluginPermissions;
   limits: PluginLimits;
 }
