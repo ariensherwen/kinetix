@@ -630,13 +630,7 @@ impl PluginManager {
         let _guard = rt.arm_deadline(&mut p.store, p.wall_time);
         let res = plugin
             .auth_flow()
-            .call_begin(
-                &mut p.store,
-                flow_name,
-                redirect_uri,
-                state,
-                pkce_challenge,
-            )
+            .call_begin(&mut p.store, flow_name, redirect_uri, state, pkce_challenge)
             .await
             .map_err(map_call_error)
             .and_then(map_auth_result);
@@ -671,13 +665,7 @@ impl PluginManager {
         let _guard = rt.arm_deadline(&mut p.store, p.wall_time);
         let res = plugin
             .auth_flow()
-            .call_exchange(
-                &mut p.store,
-                flow_name,
-                code,
-                redirect_uri,
-                pkce_verifier,
-            )
+            .call_exchange(&mut p.store, flow_name, code, redirect_uri, pkce_verifier)
             .await
             .map_err(map_call_error)
             .and_then(map_auth_result);
