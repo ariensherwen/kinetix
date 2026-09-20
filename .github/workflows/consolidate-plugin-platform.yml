@@ -119,6 +119,15 @@ jobs:
           text = text.replace(test_ctor, test_ctor_new, 1)
 
           path.write_text(text)
+
+          integration_tests = Path("tests/plugins.rs")
+          tests_text = integration_tests.read_text()
+          restart_ctor = "        Arc::new(Crypto::new(&[9u8; 32])),\n        HostPolicy::default(),"
+          restart_ctor_new = "        Arc::new(Crypto::new(&[9u8; 32])),\n        reqwest::Client::new(),\n        HostPolicy::default(),"
+          if restart_ctor not in tests_text:
+              raise SystemExit("component-cache restart constructor pattern missing")
+          tests_text = tests_text.replace(restart_ctor, restart_ctor_new, 1)
+          integration_tests.write_text(tests_text)
           PY
 
       - name: Install Rust toolchain
