@@ -366,6 +366,8 @@ impl Adapter for OpenAiAdapter {
                         id: id.to_string(),
                         display_name: None,
                         context_window: m.get("context_window").and_then(|v| v.as_i64()),
+                        capabilities: None,
+                        raw_metadata: None,
                         max_output_tokens: m.get("max_output_tokens").and_then(|v| v.as_i64()),
                     });
                 }
