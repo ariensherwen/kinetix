@@ -147,6 +147,24 @@ export const PluginsView: React.FC = () => {
     }
   };
 
+  const removePlugin = async (id: string) => {
+    setBusy('remove');
+    setError(null);
+    setNotice(null);
+    try {
+      await Kinetix.removePlugin(id);
+      setSelectedId(null);
+      setDetail(null);
+      setPermissions(null);
+      setNotice('Plugin removed.');
+      await refresh(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const install = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!packageFile) {
@@ -567,16 +585,7 @@ export const PluginsView: React.FC = () => {
                       if (!window.confirm(`Remove plugin ${selected.id}? This also removes its plugin state.`)) {
                         return;
                       }
-                      void mutate(
-                        'remove',
-                        () => Kinetix.removePlugin(selected.id),
-                        'Plugin removed.',
-                      ).then(() => {
-                        setSelectedId(null);
-                        setDetail(null);
-                        setPermissions(null);
-                        void refresh(null);
-                      });
+                      void removePlugin(selected.id);
                     }}
                     className="gap-2"
                   >
