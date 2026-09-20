@@ -778,10 +778,9 @@ mod tests {
         let mut denied = test_ctx(false, vec!["oauth2.googleapis.com".into()]);
         let err = denied.send(req.clone()).await.unwrap().unwrap_err();
         assert_eq!(err.code, "permission_denied");
-        assert!(
-            err.message
-                .contains("not available to this plugin capability")
-        );
+        assert!(err
+            .message
+            .contains("not available to this plugin capability"));
 
         // With capability-level HTTP enabled, the request advances to the
         // manifest host allow-list instead of being rejected by capability policy.
