@@ -1562,26 +1562,24 @@ impl PluginManager {
         drop(guard);
 
         let result = match call {
-            Ok(facts) => {
-                match build_cached_fact_snapshot(facts, pending, &crate::db::now_iso()) {
-                    Ok(snapshot) => match store::kv_replace_prefix_limited(
-                        &self.inner.pool,
-                        &self.inner.crypto,
-                        id,
-                        super::runtime::CACHE_PREFIX,
-                        &snapshot,
-                        limits.storage,
-                    )
-                    .await
-                    {
-                        Ok(()) => Ok(snapshot.len()),
-                        Err(error) => Err(PluginFault::Internal(format!(
-                            "persisting cached routing fact snapshot: {error}"
-                        ))),
-                    },
-                    Err(fault) => Err(fault),
-                }
-            }
+            Ok(facts) => match build_cached_fact_snapshot(facts, pending, &crate::db::now_iso()) {
+                Ok(snapshot) => match store::kv_replace_prefix_limited(
+                    &self.inner.pool,
+                    &self.inner.crypto,
+                    id,
+                    super::runtime::CACHE_PREFIX,
+                    &snapshot,
+                    limits.storage,
+                )
+                .await
+                {
+                    Ok(()) => Ok(snapshot.len()),
+                    Err(error) => Err(PluginFault::Internal(format!(
+                        "persisting cached routing fact snapshot: {error}"
+                    ))),
+                },
+                Err(fault) => Err(fault),
+            },
             Err(fault) => Err(fault),
         };
 
@@ -2167,14 +2165,13 @@ mod tests {
 
     #[test]
     fn cached_fact_snapshot_rejects_duplicate_and_invalid_values() {
-        let fact = |name: &str, value_json: &str, max_age_ms: Option<u64>| {
-            wit::types::RoutingFact {
+        let fact =
+            |name: &str, value_json: &str, max_age_ms: Option<u64>| wit::types::RoutingFact {
                 name: name.into(),
                 value_json: value_json.into(),
                 observed_at: Some("guest-controlled".into()),
                 max_age_ms,
-            }
-        };
+            };
 
         let duplicate = build_cached_fact_snapshot(
             vec![
@@ -2185,7 +2182,9 @@ mod tests {
             "2026-09-20T00:00:00Z",
         )
         .unwrap_err();
-        assert!(duplicate.message().contains("duplicate cached routing fact"));
+        assert!(duplicate
+            .message()
+            .contains("duplicate cached routing fact"));
 
         let invalid = build_cached_fact_snapshot(
             vec![fact("capacity", "{bad", Some(30_000))],
@@ -2212,14 +2211,10 @@ mod tests {
             observed_at: Some("1900-01-01T00:00:00Z".into()),
             max_age_ms: Some(30_000),
         };
-        let snapshot = build_cached_fact_snapshot(
-            vec![fact],
-            Default::default(),
-            "2026-09-20T00:00:00Z",
-        )
-        .unwrap();
-        let envelope: serde_json::Value =
-            serde_json::from_slice(&snapshot[0].1).unwrap();
+        let snapshot =
+            build_cached_fact_snapshot(vec![fact], Default::default(), "2026-09-20T00:00:00Z")
+                .unwrap();
+        let envelope: serde_json::Value = serde_json::from_slice(&snapshot[0].1).unwrap();
         assert_eq!(
             envelope["observed_at"],
             serde_json::Value::String("2026-09-20T00:00:00Z".into())
