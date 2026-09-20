@@ -121,7 +121,6 @@ struct Inner {
     pool: Pool,
     crypto: Arc<Crypto>,
     backing: Arc<Backing>,
-    http: reqwest::Client,
     policy: HostPolicy,
     package_root: PathBuf,
     semaphore: Semaphore,
@@ -137,7 +136,6 @@ impl PluginManager {
     pub fn new(
         pool: Pool,
         crypto: Arc<Crypto>,
-        http: reqwest::Client,
         policy: HostPolicy,
         package_root: PathBuf,
     ) -> Result<Self> {
@@ -158,7 +156,6 @@ impl PluginManager {
                 pool,
                 crypto,
                 backing,
-                http,
                 policy,
                 package_root,
                 semaphore: Semaphore::new(MAX_CONCURRENT_INVOCATIONS),
@@ -829,16 +826,17 @@ impl PluginManager {
         let ctx = HostCtx {
             plugin_id: row.id.clone(),
             network_hosts,
+            allow_private_network: self.inner.policy.allow_private_network,
             credential_read,
             credential_sign: !credential_scopes.is_empty(),
             credential_scopes,
             storage_quota: limits.storage,
             max_outbound_requests: limits.max_outbound_requests,
             max_http_body: limits.max_http_body,
+            http_timeout: Duration::from_millis(limits.wall_time_ms.max(1)),
             adapter_stream: adapter,
             buffered_http_allowed,
             outbound_count: 0,
-            http: self.inner.http.clone(),
             backing: self.inner.backing.clone(),
             limits: wasmtime::StoreLimitsBuilder::new().build(),
         };
