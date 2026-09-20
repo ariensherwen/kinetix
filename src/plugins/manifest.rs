@@ -438,6 +438,14 @@ pub fn validate(manifest: Manifest, policy: HostPolicy) -> Result<ValidatedManif
             manifest.routing_facts_mode
         );
     }
+    if !manifest.provides.routing_facts.is_empty()
+        && manifest.routing_facts_mode == "cached"
+        && !(5_000..=3_600_000).contains(&manifest.routing_facts_refresh_ms)
+    {
+        bail!(
+            "routing_facts_refresh_ms must be 5000..=3600000 for cached routing facts"
+        );
+    }
 
     // §7.1: an adapter plugin is a pure translation library and must not hold
     // outbound network authority. This is enforced at runtime (the adapter-world
@@ -771,6 +779,31 @@ storage = "2MiB"
         assert!(
             err.to_string()
                 .contains("references a credential strategy this plugin does not provide"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn cached_routing_facts_require_bounded_refresh_cadence() {
+        let cached = GOOD
+            .replace(
+                "plugin_api = \"1\"",
+                "plugin_api = \"1\"\nrouting_facts_mode = \"cached\"\nrouting_facts_refresh_ms = 30000",
+            )
+            .replace(
+                "model_sources = [\"foo-models\"]",
+                "model_sources = [\"foo-models\"]\nrouting_facts = [\"capacity\"]",
+            );
+        assert!(parse_and_validate(&cached, HostPolicy::default()).is_ok());
+
+        let too_fast = cached.replace(
+            "routing_facts_refresh_ms = 30000",
+            "routing_facts_refresh_ms = 1000",
+        );
+        let err = parse_and_validate(&too_fast, HostPolicy::default()).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("routing_facts_refresh_ms must be 5000..=3600000"),
             "{err}"
         );
     }
