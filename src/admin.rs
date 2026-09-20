@@ -984,6 +984,14 @@ pub async fn discover_models(
                     display_name: m.display_name,
                     context_window: m.context_window.map(|v| v as i64),
                     max_output_tokens: m.max_output_tokens.map(|v| v as i64),
+                    capabilities: m
+                        .capabilities_json
+                        .as_deref()
+                        .and_then(|value| serde_json::from_str(value).ok()),
+                    raw_metadata: m
+                        .raw_metadata
+                        .as_deref()
+                        .and_then(|value| serde_json::from_str(value).ok()),
                 })
                 .collect()
         } else {
@@ -1011,6 +1019,8 @@ pub async fn discover_models(
                     "context_window": m.context_window,
                     "max_output_tokens": m.max_output_tokens,
                     "display_name": m.display_name,
+                    "capabilities": m.capabilities,
+                    "raw_metadata": m.raw_metadata,
                     "disappeared": false,
                 }),
             )
@@ -1021,6 +1031,8 @@ pub async fn discover_models(
             "display_name": m.display_name,
             "context_window": m.context_window,
             "max_output_tokens": m.max_output_tokens,
+            "capabilities": m.capabilities,
+            "raw_metadata": m.raw_metadata,
             "already_imported": existing.iter().any(|e| e.upstream_id == m.id),
         }));
     }
