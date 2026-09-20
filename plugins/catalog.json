@@ -9,7 +9,7 @@
       "official": true,
       "homepage": "https://github.com/LazyGreed/kinetix/tree/main/plugins/antigravity-oauth",
       "latest_version": "0.1.0",
-      "artifact_name": "antigravity-oauth-0.1.0.kxp",
+      "artifact_name": "dev.kinetix.antigravity-oauth-0.1.0.kxp",
       "capabilities": [
         "credential_strategy",
         "auth_flow",
