@@ -696,12 +696,64 @@ fn default_permissive() -> String {
     "permissive".into()
 }
 
+async fn provider_plugin_binding_problems(
+    state: &AppState,
+    body: &ProviderBody,
+) -> Vec<String> {
+    use crate::plugins::Capability;
+
+    let bindings = [
+        ("wire_plugin", body.wire_plugin.as_str(), Capability::ProviderAdapter),
+        (
+            "credential_plugin",
+            body.credential_plugin.as_str(),
+            Capability::CredentialStrategy,
+        ),
+        (
+            "model_source_plugin",
+            body.model_source_plugin.as_str(),
+            Capability::ModelSource,
+        ),
+    ];
+
+    let mut problems = Vec::new();
+    for (field, reference, capability) in bindings {
+        let reference = reference.trim();
+        if reference.is_empty() {
+            continue;
+        }
+        if crate::plugins::PluginRef::parse(reference).is_none() {
+            problems.push(format!(
+                "{field} must use plugin:<id>/<capability-name> syntax"
+            ));
+            continue;
+        }
+        let Some(manager) = state.plugin_manager() else {
+            problems.push(format!(
+                "{field} references '{reference}' but the plugin host is unavailable"
+            ));
+            continue;
+        };
+        if manager.resolve_binding(reference, capability).await.is_none() {
+            problems.push(format!(
+                "{field} reference '{reference}' does not resolve to an installed, enabled, approved plugin providing {}",
+                capability.manifest_key()
+            ));
+        }
+    }
+    problems
+}
+
 pub async fn create_provider(
     State(state): State<AppState>,
     _auth: AdminAuth,
     Json(body): Json<ProviderBody>,
 ) -> ApiResult {
     validate_outbound_url(&state, &body.base_url)?;
+    let binding_problems = provider_plugin_binding_problems(&state, &body).await;
+    if !binding_problems.is_empty() {
+        return Err(ApiError::bad(binding_problems.join("; ")));
+    }
     let wire =
         WireFormat::parse(&body.wire_format).ok_or_else(|| ApiError::bad("invalid wire_format"))?;
     let auth =
@@ -777,6 +829,10 @@ pub async fn update_provider(
     Json(body): Json<ProviderBody>,
 ) -> ApiResult {
     validate_outbound_url(&state, &body.base_url)?;
+    let binding_problems = provider_plugin_binding_problems(&state, &body).await;
+    if !binding_problems.is_empty() {
+        return Err(ApiError::bad(binding_problems.join("; ")));
+    }
     let wire =
         WireFormat::parse(&body.wire_format).ok_or_else(|| ApiError::bad("invalid wire_format"))?;
     let auth =
@@ -1978,6 +2034,7 @@ pub async fn validate_provider(
         body.custom_header_name.as_deref(),
         body.custom_param_name.as_deref(),
     );
+    problems.extend(provider_plugin_binding_problems(&state, &body).await);
     let mut warnings: Vec<String> = Vec::new();
     let mut security: Value = Value::String("not_checked".into());
     if body.base_url.trim().is_empty() {
