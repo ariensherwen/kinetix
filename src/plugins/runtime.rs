@@ -25,6 +25,17 @@ pub mod bindings {
     });
 }
 
+/// Optional credential-aware model discovery world.
+pub mod model_source_v2_bindings {
+    wasmtime::component::bindgen!({
+        path: "wit/kinetix-plugin.wit",
+        world: "plugin-model-source-v2",
+        imports: { default: async | trappable },
+        exports: { default: async },
+        anyhow: true,
+    });
+}
+
 /// Optional account-authorization world. Separate binding preserves API-v1
 /// compatibility for components that do not provide browser auth.
 pub mod auth_bindings {
@@ -266,6 +277,18 @@ impl PluginRuntime {
         bindings::Plugin::instantiate_async(store, component, linker)
             .await
             .map_err(|e| anyhow::anyhow!("instantiating plugin component: {e}"))
+    }
+
+    /// Instantiate the optional credential-aware model-source world.
+    pub async fn instantiate_model_source_v2(
+        &self,
+        linker: &Linker<HostCtx>,
+        store: &mut Store<HostCtx>,
+        component: &Component,
+    ) -> Result<model_source_v2_bindings::PluginModelSourceV2> {
+        model_source_v2_bindings::PluginModelSourceV2::instantiate_async(store, component, linker)
+            .await
+            .map_err(|e| anyhow::anyhow!("instantiating plugin model-source-v2 component: {e}"))
     }
 
     /// Instantiate the optional browser/account authorization world.
