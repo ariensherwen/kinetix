@@ -786,19 +786,6 @@ impl PluginManager {
         adapter: bool,
         buffered_http_allowed: bool,
     ) -> wasmtime::Store<HostCtx> {
-        let manifest = row.manifest().unwrap_or_else(|| Manifest {
-            manifest_version: 1,
-            id: row.id.clone(),
-            name: row.id.clone(),
-            version: row.version.clone(),
-            plugin_api: "1".into(),
-            provides: Default::default(),
-            integrations: Default::default(),
-            ui: Default::default(),
-            permissions: Default::default(),
-            limits: Limits::default(),
-            routing_facts_mode: "pure".into(),
-        });
         // Runtime authority is derived only from approved grant rows.
         let mut network_hosts = Vec::new();
         let mut credential_scopes = Vec::new();
@@ -1324,7 +1311,7 @@ impl PluginManager {
         let rt = self.inner.runtime.clone();
         let _guard = rt.arm_deadline(&mut p.store, Duration::from_secs(30));
         let res = plugin
-            .model_source_v2()
+            .kinetix_plugin_model_source_v2()
             .call_discover(&mut p.store, provider_id, account_id, base_url, models_path)
             .await
             .map_err(map_call_error)
