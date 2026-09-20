@@ -149,6 +149,11 @@ pub struct PluginManager {
     inner: Arc<Inner>,
 }
 
+struct CachedComponent {
+    package_sha256: String,
+    component: Arc<wasmtime::component::Component>,
+}
+
 struct Inner {
     runtime: PluginRuntime,
     pool: Pool,
@@ -156,6 +161,9 @@ struct Inner {
     backing: Arc<Backing>,
     policy: HostPolicy,
     package_root: PathBuf,
+    /// One compiled component per active plugin package. Stores/instances are
+    /// deliberately never cached because they carry invocation authority.
+    component_cache: DashMap<String, CachedComponent>,
     semaphore: Arc<Semaphore>,
     plugin_semaphores: Mutex<HashMap<String, Arc<Semaphore>>>,
     metrics: Arc<PluginMetricRegistry>,
@@ -164,6 +172,8 @@ struct Inner {
     faults: std::sync::atomic::AtomicU64,
     timeouts: std::sync::atomic::AtomicU64,
     cancellations: std::sync::atomic::AtomicU64,
+    component_cache_hits: std::sync::atomic::AtomicU64,
+    component_cache_misses: std::sync::atomic::AtomicU64,
 }
 
 impl PluginManager {
@@ -194,6 +204,7 @@ impl PluginManager {
                 backing,
                 policy,
                 package_root,
+                component_cache: DashMap::new(),
                 semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_INVOCATIONS)),
                 plugin_semaphores: Mutex::new(HashMap::new()),
                 metrics,
@@ -201,6 +212,8 @@ impl PluginManager {
                 faults: Default::default(),
                 timeouts: Default::default(),
                 cancellations: Default::default(),
+                component_cache_hits: Default::default(),
+                component_cache_misses: Default::default(),
             }),
         })
     }
@@ -222,7 +235,42 @@ impl PluginManager {
                 .iter()
                 .map(|entry| entry.value().http_requests.load(Relaxed))
                 .sum(),
+            component_cache_hits: self.inner.component_cache_hits.load(Relaxed),
+            component_cache_misses: self.inner.component_cache_misses.load(Relaxed),
         }
+    }
+
+    fn remember_component(
+        &self,
+        plugin_id: &str,
+        package_sha256: &str,
+        component: Arc<wasmtime::component::Component>,
+    ) {
+        self.inner.component_cache.insert(
+            plugin_id.to_string(),
+            CachedComponent {
+                package_sha256: package_sha256.to_string(),
+                component,
+            },
+        );
+    }
+
+    /// Return compiled code for the active package. This cache contains no
+    /// Store, instance, permission state, quotas, or deadlines.
+    fn compiled_component(&self, row: &PluginRow) -> Result<Arc<wasmtime::component::Component>> {
+        use std::sync::atomic::Ordering::Relaxed;
+
+        if let Some(cached) = self.inner.component_cache.get(&row.id) {
+            if cached.package_sha256 == row.package_sha256 {
+                self.inner.component_cache_hits.fetch_add(1, Relaxed);
+                return Ok(cached.component.clone());
+            }
+        }
+
+        self.inner.component_cache_misses.fetch_add(1, Relaxed);
+        let component = Arc::new(self.inner.runtime.compile(&row.component)?);
+        self.remember_component(&row.id, &row.package_sha256, component.clone());
+        Ok(component)
     }
 
     pub fn metrics_for_plugin(&self, id: &str) -> PluginMetricsSnapshot {
@@ -301,11 +349,14 @@ impl PluginManager {
         if sig == SignatureStatus::Untrusted && !allow_untrusted_signature {
             bail!("package signature is present but not from a trusted publisher key");
         }
-        // Compile now so a broken component is rejected before it is stored.
-        self.inner
-            .runtime
-            .compile(&pkg.component)
-            .map_err(|e| anyhow!("{e}"))?;
+        // Compile now so a broken component is rejected before it is stored,
+        // then publish that exact compiled code only after DB publication.
+        let compiled = Arc::new(
+            self.inner
+                .runtime
+                .compile(&pkg.component)
+                .map_err(|e| anyhow!("{e}"))?,
+        );
 
         // Preserve the exact accepted package before publishing its active
         // metadata. The filename is content-addressed so the version string
@@ -326,6 +377,8 @@ impl PluginManager {
             source,
         )
         .await?;
+
+        self.remember_component(&validated.manifest.id, &pkg.package_sha256, compiled);
 
         Ok(InstallOutcome {
             id: validated.manifest.id.clone(),
@@ -490,10 +543,12 @@ impl PluginManager {
 
         let (retained, pkg, validated) = self.load_retained_package(id, sha256).await?;
 
-        self.inner
-            .runtime
-            .compile(&pkg.component)
-            .map_err(|e| anyhow!("{e}"))?;
+        let compiled = Arc::new(
+            self.inner
+                .runtime
+                .compile(&pkg.component)
+                .map_err(|e| anyhow!("{e}"))?,
+        );
 
         let source = format!("rollback:{}", retained.package_sha256);
         store::upsert_plugin(
@@ -506,6 +561,8 @@ impl PluginManager {
             &source,
         )
         .await?;
+
+        self.remember_component(id, &retained.package_sha256, compiled);
 
         Ok(RollbackOutcome {
             id: id.to_string(),
@@ -549,12 +606,12 @@ impl PluginManager {
         let limits = manifest::effective_limits(&manifest, self.inner.policy)?;
         // Instantiate to prove the component links against our host API.
         let mut store = self.new_store(&row, &limits, &grants, false, true, "validation");
-        let component = self.inner.runtime.compile(&row.component)?;
+        let component = self.compiled_component(&row)?;
         let linker = self.inner.runtime.linker()?;
         let _ = self
             .inner
             .runtime
-            .instantiate(&linker, &mut store, &component)
+            .instantiate(&linker, &mut store, component.as_ref())
             .await?;
         store::set_enabled(&self.inner.pool, id, true).await?;
         store::clear_plugin_failures(&self.inner.pool, id).await?;
@@ -576,6 +633,7 @@ impl PluginManager {
         self.inner
             .metrics
             .retain(|(plugin_id, _), _| plugin_id != id);
+        self.inner.component_cache.remove(id);
         Ok(())
     }
 
@@ -978,7 +1036,7 @@ impl PluginManager {
         let grants = self.ensure_permissions_approved(id, &manifest).await?;
         self.ensure_circuit_ready(id).await?;
         let limits = manifest::effective_limits(&manifest, self.inner.policy)?;
-        let component = self.inner.runtime.compile(&row.component)?;
+        let component = self.compiled_component(&row)?;
         let linker = self.inner.runtime.linker()?;
         let mut store = self.new_store(
             &row,
@@ -991,7 +1049,7 @@ impl PluginManager {
         let plugin = self
             .inner
             .runtime
-            .instantiate(&linker, &mut store, &component)
+            .instantiate(&linker, &mut store, component.as_ref())
             .await?;
         self.claim_circuit_probe(id).await?;
         Ok(Prepared {
@@ -1016,13 +1074,13 @@ impl PluginManager {
         let grants = self.ensure_permissions_approved(id, &manifest).await?;
         self.ensure_circuit_ready(id).await?;
         let limits = manifest::effective_limits(&manifest, self.inner.policy)?;
-        let component = self.inner.runtime.compile(&row.component)?;
+        let component = self.compiled_component(&row)?;
         let linker = self.inner.runtime.linker()?;
         let mut store = self.new_store(&row, &limits, &grants, false, true, "auth_flow");
         let plugin = self
             .inner
             .runtime
-            .instantiate_auth(&linker, &mut store, &component)
+            .instantiate_auth(&linker, &mut store, component.as_ref())
             .await?;
         self.claim_circuit_probe(id).await?;
         Ok(AuthPrepared {
@@ -1135,13 +1193,13 @@ impl PluginManager {
         let grants = self.ensure_permissions_approved(id, &manifest).await?;
         self.ensure_circuit_ready(id).await?;
         let limits = manifest::effective_limits(&manifest, self.inner.policy)?;
-        let component = self.inner.runtime.compile(&row.component)?;
+        let component = self.compiled_component(&row)?;
         let linker = self.inner.runtime.linker()?;
         let mut store = self.new_store(&row, &limits, &grants, true, false, "provider_adapter");
         let plugin = self
             .inner
             .runtime
-            .instantiate_adapter(&linker, &mut store, &component)
+            .instantiate_adapter(&linker, &mut store, component.as_ref())
             .await?;
         self.claim_circuit_probe(id).await?;
         Ok(AdapterPrepared {
@@ -1605,14 +1663,14 @@ impl PluginManager {
             .manifest()
             .ok_or_else(|| anyhow!("plugin '{id}' has an unreadable manifest"))?;
         let limits = manifest::effective_limits(&manifest, self.inner.policy)?;
-        let component = self.inner.runtime.compile(&row.component)?;
+        let component = self.compiled_component(&row)?;
         let linker = self.inner.runtime.linker()?;
         // Validation proves linking with no runtime authority granted.
         let mut store = self.new_store(&row, &limits, &[], false, false, "validation");
         let _ = self
             .inner
             .runtime
-            .instantiate(&linker, &mut store, &component)
+            .instantiate(&linker, &mut store, component.as_ref())
             .await?;
         Ok(manifest.provides.provided())
     }
@@ -1802,6 +1860,8 @@ pub struct PluginCounters {
     pub timeouts: u64,
     pub cancellations: u64,
     pub http_requests: u64,
+    pub component_cache_hits: u64,
+    pub component_cache_misses: u64,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
