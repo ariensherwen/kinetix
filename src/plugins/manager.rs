@@ -8,9 +8,10 @@
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
+use dashmap::DashMap;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::crypto::Crypto;
@@ -33,10 +34,35 @@ const CIRCUIT_FAULT_THRESHOLD: i64 = 5;
 /// Cooldown before a half-open probe (§15).
 const CIRCUIT_OPEN_SECS: i64 = 60;
 
+#[derive(Default)]
+struct PluginMetricCell {
+    invocations: std::sync::atomic::AtomicU64,
+    successes: std::sync::atomic::AtomicU64,
+    faults: std::sync::atomic::AtomicU64,
+    timeouts: std::sync::atomic::AtomicU64,
+    cancellations: std::sync::atomic::AtomicU64,
+    http_requests: std::sync::atomic::AtomicU64,
+    duration_micros: std::sync::atomic::AtomicU64,
+}
+
+type PluginMetricRegistry = DashMap<(String, String), Arc<PluginMetricCell>>;
+
+fn metric_cell(
+    registry: &PluginMetricRegistry,
+    plugin_id: &str,
+    capability: &str,
+) -> Arc<PluginMetricCell> {
+    registry
+        .entry((plugin_id.to_string(), capability.to_string()))
+        .or_insert_with(|| Arc::new(PluginMetricCell::default()))
+        .clone()
+}
+
 /// Backing implementation for host effects (storage, logs, credentials).
 pub struct Backing {
     pool: Pool,
     crypto: Arc<Crypto>,
+    metrics: Arc<PluginMetricRegistry>,
 }
 
 #[async_trait::async_trait]
@@ -55,6 +81,12 @@ impl HostBacking for Backing {
     }
     async fn kv_delete(&self, plugin_id: &str, key: &str) -> Result<()> {
         store::kv_delete(&self.pool, plugin_id, key).await
+    }
+    fn record_http_request(&self, plugin_id: &str, capability: &str) {
+        use std::sync::atomic::Ordering::Relaxed;
+        metric_cell(&self.metrics, plugin_id, capability)
+            .http_requests
+            .fetch_add(1, Relaxed);
     }
     async fn credential_scope_allows(
         &self,
@@ -126,6 +158,7 @@ struct Inner {
     package_root: PathBuf,
     semaphore: Arc<Semaphore>,
     plugin_semaphores: Mutex<HashMap<String, Arc<Semaphore>>>,
+    metrics: Arc<PluginMetricRegistry>,
     /// Simple counters for the admin metrics surface (§18).
     invocations: std::sync::atomic::AtomicU64,
     faults: std::sync::atomic::AtomicU64,
@@ -148,9 +181,11 @@ impl PluginManager {
             )
         })?;
         let runtime = PluginRuntime::new()?;
+        let metrics = Arc::new(PluginMetricRegistry::new());
         let backing = Arc::new(Backing {
             pool: pool.clone(),
             crypto: crypto.clone(),
+            metrics: metrics.clone(),
         });
         Ok(PluginManager {
             inner: Arc::new(Inner {
@@ -162,6 +197,7 @@ impl PluginManager {
                 package_root,
                 semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_INVOCATIONS)),
                 plugin_semaphores: Mutex::new(HashMap::new()),
+                metrics,
                 invocations: Default::default(),
                 faults: Default::default(),
                 timeouts: Default::default(),
