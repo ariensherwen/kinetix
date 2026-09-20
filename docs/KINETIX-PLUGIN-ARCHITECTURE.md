@@ -406,8 +406,19 @@ on_target_candidate        read-only
 on_usage_finalized         read-only + optional external side effect
 ```
 
-`on_usage_finalized` side effects run on the bounded async accounting queue (FR-6.4) and are
-fire-and-forget: they may never block, fail, or slow a client request.
+All hook side effects run on a bounded fire-and-forget queue and may never
+block, fail, or slow a client request.
+
+Hook dispatch avoids cross-plugin head-of-line blocking in two places:
+
+- up to **32 hook jobs** execute concurrently from the bounded queue;
+- within one hook event, eligible plugins are invoked concurrently rather than
+  serially.
+
+Per-plugin invocation isolation (§14.0.2) still caps each guest at four active
+invocations, so concurrent hook fan-out cannot let one plugin exceed its normal
+runtime budget. If the hook queue is saturated, new hook work is dropped rather
+than applying backpressure to the client path.
 
 Only add a mutable hook after its allowed mutation surface is explicitly modeled.
 
