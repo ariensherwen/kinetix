@@ -135,6 +135,10 @@ pub fn build(state: AppState) -> Router {
         .route("/plugins/auth/start", post(admin::start_plugin_auth))
         .route("/plugins/auth/callback", get(admin::plugin_auth_callback))
         .route(
+            "/plugins/{id}/integrations/{integration}/provider",
+            post(admin::setup_plugin_integration_provider),
+        )
+        .route(
             "/plugins/{id}",
             get(admin::get_plugin).delete(admin::remove_plugin),
         )
