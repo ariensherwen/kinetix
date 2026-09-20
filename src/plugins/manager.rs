@@ -5,13 +5,13 @@
 //! Wasmtime for request-path work, and it always maps guest results into typed
 //! evidence that core policy consumes.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
-use tokio::sync::Semaphore;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::crypto::Crypto;
 use crate::db::Pool;
@@ -24,9 +24,10 @@ use super::runtime::{
 use super::store::{self, PermissionGrant, PluginRow};
 use super::types::{Capability, Limits, Manifest, Permissions, Provided};
 
-/// Bounds concurrent guest invocations so a flood of one plugin cannot exhaust
-/// host threads or memory (§14).
+/// Bounds total concurrent guest invocations across the process (§14).
 const MAX_CONCURRENT_INVOCATIONS: usize = 16;
+/// Prevent one plugin from monopolizing the global guest-execution budget.
+const MAX_CONCURRENT_INVOCATIONS_PER_PLUGIN: usize = 4;
 /// Consecutive runtime faults before a plugin's circuit opens (§15).
 const CIRCUIT_FAULT_THRESHOLD: i64 = 5;
 /// Cooldown before a half-open probe (§15).
@@ -123,7 +124,8 @@ struct Inner {
     backing: Arc<Backing>,
     policy: HostPolicy,
     package_root: PathBuf,
-    semaphore: Semaphore,
+    semaphore: Arc<Semaphore>,
+    plugin_semaphores: Mutex<HashMap<String, Arc<Semaphore>>>,
     /// Simple counters for the admin metrics surface (§18).
     invocations: std::sync::atomic::AtomicU64,
     faults: std::sync::atomic::AtomicU64,
@@ -158,7 +160,8 @@ impl PluginManager {
                 backing,
                 policy,
                 package_root,
-                semaphore: Semaphore::new(MAX_CONCURRENT_INVOCATIONS),
+                semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_INVOCATIONS)),
+                plugin_semaphores: Mutex::new(HashMap::new()),
                 invocations: Default::default(),
                 faults: Default::default(),
                 timeouts: Default::default(),
@@ -497,6 +500,11 @@ impl PluginManager {
 
     pub async fn remove(&self, id: &str) -> Result<()> {
         store::delete_plugin(&self.inner.pool, id).await?;
+        self.inner
+            .plugin_semaphores
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(id);
         Ok(())
     }
 
@@ -782,6 +790,39 @@ impl PluginManager {
     // Invocation plumbing
     // -----------------------------------------------------------------------
 
+    fn plugin_semaphore(&self, id: &str) -> Arc<Semaphore> {
+        let mut semaphores = self
+            .inner
+            .plugin_semaphores
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        semaphores
+            .entry(id.to_string())
+            .or_insert_with(|| Arc::new(Semaphore::new(MAX_CONCURRENT_INVOCATIONS_PER_PLUGIN)))
+            .clone()
+    }
+
+    async fn acquire_invocation_permits(&self, id: &str) -> InvocationPermits {
+        // Acquire the plugin-local slot first. A noisy plugin waiting on its
+        // own limit must not reserve a global slot that another plugin could use.
+        let plugin = self
+            .plugin_semaphore(id)
+            .acquire_owned()
+            .await
+            .expect("plugin invocation semaphore is never closed");
+        let global = self
+            .inner
+            .semaphore
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("global plugin invocation semaphore is never closed");
+        InvocationPermits {
+            _plugin: plugin,
+            _global: global,
+        }
+    }
+
     async fn ensure_circuit_ready(&self, id: &str) -> Result<()> {
         if !store::circuit_ready(&self.inner.pool, id).await? {
             bail!("plugin '{id}' circuit is open or already half-open");
@@ -934,7 +975,7 @@ impl PluginManager {
             )));
         }
         self.bump_invocation();
-        let _permit = self.inner.semaphore.acquire().await;
+        let _permits = self.acquire_invocation_permits(id).await;
         let mut prepared = self
             .prepare_auth(id)
             .await
@@ -975,7 +1016,7 @@ impl PluginManager {
             )));
         }
         self.bump_invocation();
-        let _permit = self.inner.semaphore.acquire().await;
+        let _permits = self.acquire_invocation_permits(id).await;
         let mut prepared = self
             .prepare_auth(id)
             .await
@@ -1040,7 +1081,7 @@ impl PluginManager {
 
     pub async fn adapter_wire_format(&self, id: &str) -> Result<String, PluginFault> {
         self.bump_invocation();
-        let _permit = self.inner.semaphore.acquire().await;
+        let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
             .prepare_adapter(id)
             .await
@@ -1063,7 +1104,7 @@ impl PluginManager {
         model_json: &str,
     ) -> Result<String, PluginFault> {
         self.bump_invocation();
-        let _permit = self.inner.semaphore.acquire().await;
+        let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
             .prepare_adapter(id)
             .await
@@ -1087,7 +1128,7 @@ impl PluginManager {
         credential: &str,
     ) -> Result<String, PluginFault> {
         self.bump_invocation();
-        let _permit = self.inner.semaphore.acquire().await;
+        let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
             .prepare_adapter(id)
             .await
@@ -1112,7 +1153,7 @@ impl PluginManager {
         model_json: &str,
     ) -> Result<String, PluginFault> {
         self.bump_invocation();
-        let _permit = self.inner.semaphore.acquire().await;
+        let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
             .prepare_adapter(id)
             .await
@@ -1137,7 +1178,7 @@ impl PluginManager {
         headers_json: &str,
     ) -> Result<String, PluginFault> {
         self.bump_invocation();
-        let _permit = self.inner.semaphore.acquire().await;
+        let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
             .prepare_adapter(id)
             .await
@@ -1160,7 +1201,7 @@ impl PluginManager {
         data: &str,
     ) -> Result<String, PluginFault> {
         self.bump_invocation();
-        let _permit = self.inner.semaphore.acquire().await;
+        let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
             .prepare_adapter(id)
             .await
@@ -1183,7 +1224,7 @@ impl PluginManager {
         body_json: &str,
     ) -> Result<String, PluginFault> {
         self.bump_invocation();
-        let _permit = self.inner.semaphore.acquire().await;
+        let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
             .prepare_adapter(id)
             .await
@@ -1248,7 +1289,7 @@ impl PluginManager {
         account_label: &str,
     ) -> Result<wit::types::CredentialLease, PluginFault> {
         self.bump_invocation();
-        let _permit = self.inner.semaphore.acquire().await;
+        let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
             .prepare(id, true)
             .await
@@ -1274,7 +1315,7 @@ impl PluginManager {
         models_path: &str,
     ) -> Result<Vec<wit::types::DiscoveredModel>, PluginFault> {
         self.bump_invocation();
-        let _permit = self.inner.semaphore.acquire().await;
+        let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
             .prepare(id, true)
             .await
@@ -1299,7 +1340,7 @@ impl PluginManager {
         account_id: &str,
     ) -> Result<wit::types::HealthObservation, PluginFault> {
         self.bump_invocation();
-        let _permit = self.inner.semaphore.acquire().await;
+        let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
             .prepare(id, true)
             .await
@@ -1327,7 +1368,7 @@ impl PluginManager {
         cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> Result<Vec<wit::types::RoutingFact>, PluginFault> {
         self.bump_invocation();
-        let _permit = self.inner.semaphore.acquire().await;
+        let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
             .prepare(id, false)
             .await
@@ -1354,7 +1395,7 @@ impl PluginManager {
         request_json: &str,
     ) -> Result<Vec<wit::types::RoutingFact>, PluginFault> {
         self.bump_invocation();
-        let _permit = self.inner.semaphore.acquire().await;
+        let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
             .prepare(id, false)
             .await
@@ -1378,7 +1419,7 @@ impl PluginManager {
         request_json: &str,
     ) -> Result<(), PluginFault> {
         self.bump_invocation();
-        let _permit = self.inner.semaphore.acquire().await;
+        let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
             .prepare(id, true)
             .await
@@ -1402,7 +1443,7 @@ impl PluginManager {
         target_json: &str,
     ) -> Result<(), PluginFault> {
         self.bump_invocation();
-        let _permit = self.inner.semaphore.acquire().await;
+        let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
             .prepare(id, true)
             .await
@@ -1427,7 +1468,7 @@ impl PluginManager {
         usage_json: &str,
     ) -> Result<(), PluginFault> {
         self.bump_invocation();
-        let _permit = self.inner.semaphore.acquire().await;
+        let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
             .prepare(id, true)
             .await
@@ -1549,6 +1590,11 @@ fn spawn_cancel_watchdog(
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
     })
+}
+
+struct InvocationPermits {
+    _plugin: OwnedSemaphorePermit,
+    _global: OwnedSemaphorePermit,
 }
 
 struct Prepared {
