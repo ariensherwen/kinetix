@@ -959,6 +959,7 @@ impl PluginManager {
             credential_sign: !credential_scopes.is_empty(),
             credential_scopes,
             storage_quota: limits.storage,
+            pending_cache: Default::default(),
             max_outbound_requests: limits.max_outbound_requests,
             max_http_body: limits.max_http_body,
             http_timeout: Duration::from_millis(limits.wall_time_ms.max(1)),
