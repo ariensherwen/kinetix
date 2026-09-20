@@ -1796,6 +1796,76 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn backing_resolves_highest_priority_default_provider_secret() {
+        let dir = std::env::temp_dir().join(format!(
+            "kinetix-plugin-default-credential-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let url = format!("sqlite://{}?mode=rwc", dir.join("t.db").display());
+        let pool = crate::db::connect(&url).await.unwrap();
+        crate::db::migrate(&pool).await.unwrap();
+        let crypto = Arc::new(Crypto::new(&[17u8; 32]));
+
+        let provider_id = crate::db::insert_provider(
+            &pool,
+            &crate::db::NewProvider {
+                name: "Bound",
+                base_url: "https://example.com",
+                wire_format: crate::types::WireFormat::Plugin,
+                auth_scheme: crate::types::AuthScheme::Bearer,
+                custom_header_name: None,
+                custom_param_name: None,
+                extra_headers: serde_json::json!({}),
+                timeout_ms: 30_000,
+                capability_mode: "permissive",
+                models_path: None,
+                rate_limit_rules: serde_json::json!({}),
+                follow_redirects: false,
+                credential_hosts: "",
+                allow_insecure_tls: false,
+                wire_plugin: "plugin:dev.example.plugin/adapter",
+                credential_plugin: "plugin:dev.example.plugin/oauth",
+                model_source_plugin: "plugin:dev.example.plugin/models",
+            },
+        )
+        .await
+        .unwrap();
+
+        for (label, secret, priority) in [
+            ("lower", "lower-secret", 5),
+            ("preferred", "preferred-secret", 1),
+        ] {
+            let encrypted = crypto.encrypt(secret).unwrap();
+            crate::db::insert_account(
+                &pool,
+                &provider_id,
+                label,
+                &encrypted,
+                "****",
+                priority,
+                1,
+                None,
+                "unknown",
+            )
+            .await
+            .unwrap();
+        }
+
+        let backing = Backing {
+            pool: pool.clone(),
+            crypto,
+        };
+        let resolved = backing
+            .resolve_default_secret("dev.example.plugin", &provider_id)
+            .await
+            .unwrap();
+        assert_eq!(resolved, "preferred-secret");
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
     async fn backing_rejects_cross_provider_account_lookup() {
         let dir = std::env::temp_dir().join(format!(
             "kinetix-plugin-credential-test-{}",
