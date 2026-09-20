@@ -1120,9 +1120,7 @@ async fn cmd_plugin(cli: &Cli, args: PluginArgs) -> Result<()> {
         }
         PluginAction::Revoke { id, permission } => {
             manager.revoke_permission(&id, &permission).await?;
-            println!(
-                "revoked '{permission}' from '{id}'; plugin disabled (KV state retained)"
-            );
+            println!("revoked '{permission}' from '{id}'; plugin disabled (KV state retained)");
             Ok(())
         }
     }

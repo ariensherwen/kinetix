@@ -186,12 +186,11 @@ pub async fn permissions(pool: &Pool, id: &str) -> Result<Vec<PermissionRow>> {
 }
 
 /// Replace the approved permission set atomically.
-pub async fn replace_permissions(
-    pool: &Pool,
-    id: &str,
-    grants: &[PermissionGrant],
-) -> Result<()> {
-    let mut tx = pool.begin().await.context("begin plugin permission update")?;
+pub async fn replace_permissions(pool: &Pool, id: &str, grants: &[PermissionGrant]) -> Result<()> {
+    let mut tx = pool
+        .begin()
+        .await
+        .context("begin plugin permission update")?;
     sqlx::query("DELETE FROM plugin_permissions WHERE plugin_id = ?")
         .bind(id)
         .execute(&mut *tx)

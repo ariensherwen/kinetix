@@ -3717,10 +3717,7 @@ pub async fn approve_plugin_permissions(
     Path(id): Path<String>,
 ) -> ApiResult {
     let manager = plugin_manager(&state)?;
-    let grants = manager
-        .approve_permissions(&id)
-        .await
-        .map_err(plugin_bad)?;
+    let grants = manager.approve_permissions(&id).await.map_err(plugin_bad)?;
     let _ = db::insert_audit(
         &state.pool,
         "admin",

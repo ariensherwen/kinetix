@@ -355,7 +355,11 @@ impl PluginManager {
         let Some(manifest) = row.manifest() else {
             return false;
         };
-        if self.ensure_permissions_approved(id, &manifest).await.is_err() {
+        if self
+            .ensure_permissions_approved(id, &manifest)
+            .await
+            .is_err()
+        {
             return false;
         }
         match store::runtime_state(&self.inner.pool, id).await {
@@ -1173,8 +1177,12 @@ mod tests {
             credential_plugin: "",
             model_source_plugin: "",
         };
-        let provider_a = crate::db::insert_provider(&pool, &provider("A")).await.unwrap();
-        let provider_b = crate::db::insert_provider(&pool, &provider("B")).await.unwrap();
+        let provider_a = crate::db::insert_provider(&pool, &provider("A"))
+            .await
+            .unwrap();
+        let provider_b = crate::db::insert_provider(&pool, &provider("B"))
+            .await
+            .unwrap();
         let secret_enc = crypto.encrypt("provider-b-secret").unwrap();
         let account_id = crate::db::insert_account(
             &pool,

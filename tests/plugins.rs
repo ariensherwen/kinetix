@@ -105,7 +105,10 @@ async fn enable_requires_explicit_permission_approval() {
     m.install(&kxp, None, &[], false).await.unwrap();
 
     let err = m.enable("dev.example.foo").await.unwrap_err();
-    assert!(err.to_string().contains("permissions are not approved"), "{err}");
+    assert!(
+        err.to_string().contains("permissions are not approved"),
+        "{err}"
+    );
     assert_eq!(m.get("dev.example.foo").await.unwrap().unwrap().enabled, 0);
 }
 
