@@ -642,6 +642,9 @@ fn provider_json(p: &db::ProviderRow) -> Value {
         "follow_redirects": p.follow_redirects != 0,
         "credential_hosts": p.credential_hosts,
         "allow_insecure_tls": p.allow_insecure_tls != 0,
+        "wire_plugin": p.wire_plugin,
+        "credential_plugin": p.credential_plugin,
+        "model_source_plugin": p.model_source_plugin,
         "created_at": p.created_at,
     })
 }
