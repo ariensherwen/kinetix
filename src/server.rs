@@ -121,6 +121,7 @@ pub async fn run(config: Arc<Config>) -> Result<()> {
         state.crypto.clone(),
         state.http.clone(),
         HostPolicy::default(),
+        config.paths.plugin_packages_dir(),
     ) {
         Ok(manager) => state.with_plugins(Arc::new(manager)),
         Err(e) => {
