@@ -22,14 +22,13 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Merge current product stack
+      - name: Apply unique runtime hardening slices
         run: |
-          git fetch origin fix/plugin-http-dns-pinning-v021
-          git merge --no-commit --no-ff -X theirs origin/fix/plugin-http-dns-pinning-v021
-          # The older dashboard-tab slice conflicts semantically with the newer
-          # review-first catalog + post-OAuth discovery UX. Keep the current
-          # product dashboard while retaining the runtime/backend hardening.
-          git checkout origin/fix/plugin-http-dns-pinning-v021 -- dashboard/src/components/views/PluginsView.tsx
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*'
+          commits="124e4a30efd3a0d7cd763d70d7764a448fb0e1c5 ce5344b174838d02e3cef5c0fd17fec86e3b2301 48154ab4af4735b62191f110f988a298949e9f19 d39f4c84ed082d0f699ff92ed7fee2a20882b4c0 265cefa015642b9a306edd8117cbca5f0d728ab0 8232d7a2d0149d488fd94c07e6f808ed5ea6af63 e55b26097d72d67e1b504d56165d34e32d432b44 b06fe2a58e676f6397ba1159cd0c4c5da33b71e5 ff15a981de15ae793f642fc838d47331461695b8 811cc910da5e57351222b4ad128f463b9489d520 3ad4e1847453f09cbe4c685d6016f5c56ff5949f 959d3c0c2f1788137d07b3bb0112a707e0b9e118 00ee22e2597b9b1d5cd4ba9a0421633a6d72c991 92177514f7dac0dee27771a258cb95b9adfff651 e863e6e2a040fbd5b0005b2fa451a33c42f8308b dfeb5221e975bada90e32441c855f7d261f7bc76 0e94cb6a5dd26fa4e4d7fc4dd94bdc6d17cecbcc 883a85b1fb4859e6dd3be7a5ae348ff17586fd4f 848928597a6bbf674e08cec23266081a417d4e09 b9e894815f78084427bae2afecbfae34b277e2b5 f75b73f7cb6a41d308467b0de3e692f6f29dbcc6 00f60f98f457ff0ab4451fd24d6209642030cd83 04701bc97ca05a5eca5420788a966daf2d85fbab 4df9a0a71c35ffed63806644eac90d81459695eb 51329153bb585d1c1bea7ef8f6f4f8dc4e69e902 bff5266ca32b587874d2eed71e7b31c972a17c0d d2a520fa867a2d30b9ad5090490fcfe65c7ceb70 9a4f7b2d7653c790096a6a5f98dc44e0e9a1c3df e3f09c5f23870bd749071cfcdd7ec820feb8ac83 d6013708b2693523679e4197a855c116f1658c2c ae2e16cdad1f931aa0a911036a72ffdb771bcf09 633992542bbe0756d3399843841b8ff58c4f8d1a 8f85d59bca74be1078acc0eb463c3489b3591862 6343d77cf93ac648217add72f4647630f47b0ec0 867b1c9c2d1796041da2d19c31edceb87512c4a9 2a5d424b605bc2c4856214b22124c3468eee3ae3 a02f2a072d659ea3447c1715bbe97d17b65dcf76 27a6cfae0b6129782a4ffc46d71477e63da13ac8 243212fce87613d778263113886d12c5b2365cb7 888e296be647ba7b5d50a96711da1da187fe5d6b 6b442d86d1fa72b11b451f583f1eb225849bc893 ad43146ad505764c30cca50691cfdffff070196a b79fef819aa4b42b30158f7a20cc77dc40089a50 17141d09dab3fc21337077f07cc1b32696440209 2e4bb727c11ae75aae4cd388aae5aca8f5ce887e 6f1caed4e2ca35d3aea99226c2fdf7aec88e4070 ab8aab74989cb64adc37983bae7ac220bea0947a aa0863701b41fb3afc9b13a66e05eef97f7181eb d620a276c55e82decb901976966441a5026e34bb 83731d5f1d84b08d9bb191ca76b950fb2ecf5963 750dae745071b3428560817f2c13fb3365562c32 c4f587050e6107dd5dc2aed6aa9be41121794f11 dc58ac5925afd9d3843cb525dbc221d9989e9881 28c2a2176cefde3c2213dc5ba1f2302e7c25c5bd d85c157464bdf83f1cd5eec8a518308175adacb1 2862bf926e57be4a9425501c8dc20152d4dedc84 3cf9a390e44043cd157091be58941488d62b7b55 cae295ed80f90024a2f75145aa73f54e107cc4dc 37d1d9e31f1016c59b513d634850325e436b025d 69b222db74544d43ec5e92911e2a3da1f74587a5 219c7062c9bd57ecc8ab341b414aa17efb85941a f18392a0809696659743ad0df9506f523a2b5849 1e98304d90d40ca341a0b965e1531b4771dacabf aeaa4462be62c398ddd15d1e24156d7f9fd0566e 432d2e84199ab759a96b4e6e531ad1645bc78d02 d95861444b7c64ccd6ac84d99b91e90d4ae53da1 2ffec4f569e69c84252349df365a95bef03a5fe6 7da032c9505e0ae46e678541ebf6d8e7cc1f07fe a35eb4bbc098ae0d8f92cf21db0cd74ed85c0fb0"
+          for commit in $commits; do
+            git cherry-pick --empty=drop -X theirs "$commit"
+          done
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -45,21 +44,24 @@ jobs:
           cache: npm
           cache-dependency-path: dashboard/package-lock.json
 
-      - name: Build dashboard
+      - name: Validate dashboard
         working-directory: dashboard
         run: |
           npm ci
           npx tsc --noEmit
           npm run build
 
-      - name: Check Rust
+      - name: Validate Rust
         run: |
           cargo fmt --all -- --check
           cargo clippy --all-targets
           cargo test --quiet
 
-      - name: Commit consolidated branch
+      - name: Squash consolidation history
         run: |
-          git add -A
-          git commit -m "feat(plugins): consolidate plugin platform roadmap"
-          git push origin HEAD:feat/plugin-platform-v021
+          base="$(git merge-base HEAD origin/fix/plugin-http-dns-pinning-v021)"
+          git reset --soft "$base"
+          git commit -m "feat(plugins): complete managed plugin integration platform"
+
+      - name: Push canonical branch
+        run: git push --force-with-lease origin HEAD:feat/plugin-platform-v021
