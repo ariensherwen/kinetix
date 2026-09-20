@@ -536,3 +536,88 @@ pub async fn kv_bytes(pool: &Pool, plugin_id: &str) -> Result<u64> {
     .await?;
     Ok(row.get::<i64, _>("n").max(0) as u64)
 }
+
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+
+    async fn test_store() -> (Pool, Arc<Crypto>, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "kinetix-plugin-kv-quota-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let url = format!("sqlite://{}?mode=rwc", dir.join("t.db").display());
+        let pool = crate::db::connect(&url).await.unwrap();
+        crate::db::migrate(&pool).await.unwrap();
+        (pool, Arc::new(Crypto::new(&[23_u8; 32])), dir)
+    }
+
+    #[tokio::test]
+    async fn kv_quota_is_plaintext_and_replacement_aware() {
+        let (pool, crypto, dir) = test_store().await;
+
+        // Ciphertext is much larger than three bytes; a three-byte plaintext
+        // value must still fit a three-byte manifest storage quota.
+        kv_put_limited(&pool, &crypto, "p", "a", b"abc", 3)
+            .await
+            .unwrap();
+        assert_eq!(
+            kv_get(&pool, &crypto, "p", "a").await.unwrap(),
+            Some(b"abc".to_vec())
+        );
+
+        // Replacing the same key does not double-count its old value.
+        kv_put_limited(&pool, &crypto, "p", "a", b"123456", 6)
+            .await
+            .unwrap();
+
+        let err = kv_put_limited(&pool, &crypto, "p", "b", b"x", 6)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("storage quota exceeded"), "{err}");
+        assert!(kv_get(&pool, &crypto, "p", "b").await.unwrap().is_none());
+
+        // Shrinking a replacement releases quota for another key.
+        kv_put_limited(&pool, &crypto, "p", "a", b"12", 6)
+            .await
+            .unwrap();
+        kv_put_limited(&pool, &crypto, "p", "b", b"3456", 6)
+            .await
+            .unwrap();
+
+        pool.close().await;
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn concurrent_kv_writers_cannot_overcommit_quota() {
+        let (pool, crypto, dir) = test_store().await;
+        let pool_a = pool.clone();
+        let pool_b = pool.clone();
+        let crypto_a = crypto.clone();
+        let crypto_b = crypto.clone();
+
+        let a = tokio::spawn(async move {
+            kv_put_limited(&pool_a, &crypto_a, "p", "a", b"1234", 6).await
+        });
+        let b = tokio::spawn(async move {
+            kv_put_limited(&pool_b, &crypto_b, "p", "b", b"5678", 6).await
+        });
+
+        let (a, b) = tokio::join!(a, b);
+        let results = [a.unwrap(), b.unwrap()];
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert_eq!(results.iter().filter(|result| result.is_err()).count(), 1);
+
+        let stored = kv_list_prefix(&pool, &crypto, "p", "").await.unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].1.len(), 4);
+
+        pool.close().await;
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
