@@ -2908,6 +2908,20 @@ pub fn is_blocked_ip(ip: std::net::IpAddr) -> bool {
     }
 }
 
+#[cfg(test)]
+mod outbound_security_tests {
+    #[test]
+    fn blocks_ipv6_private_link_local_and_mapped_private_ranges() {
+        for raw in ["::1", "fc00::1", "fd12:3456::1", "fe80::1", "::ffff:127.0.0.1"] {
+            let ip: std::net::IpAddr = raw.parse().unwrap();
+            assert!(super::is_blocked_ip(ip), "{raw}");
+        }
+
+        let public: std::net::IpAddr = "2606:4700:4700::1111".parse().unwrap();
+        assert!(!super::is_blocked_ip(public));
+    }
+}
+
 // ===========================================================================
 // Configuration export / import (FR-10.12)
 //
