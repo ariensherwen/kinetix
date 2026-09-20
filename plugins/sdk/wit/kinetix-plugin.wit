@@ -87,6 +87,15 @@ interface types {
     health: string,
   }
 
+  /// Result of a plugin-owned account authorization flow. The host persists
+  /// `secret-json` as the account credential only after it validates the
+  /// callback state and completes the flow.
+  record auth-result {
+    secret-json: string,
+    account-label: option<string>,
+    metadata-json: option<string>,
+  }
+
   /// A typed routing fact (§6.4). Never a target selection.
   record routing-fact {
     /// Fully-qualified fact name, e.g. "plugin.dev.example.foo.region".
@@ -198,6 +207,32 @@ world plugin {
     on-request-normalized: func(request-json: string) -> result<_, plugin-error>;
     on-target-candidate: func(target-json: string) -> result<_, plugin-error>;
     on-usage-finalized: func(usage-json: string) -> result<_, plugin-error>;
+  }
+}
+
+/// Account authorization world. Kept separate from `plugin` so adding auth
+/// flows does not make a new export mandatory for existing plugin API v1
+/// components. Core owns CSRF state and PKCE verifier generation/storage; the
+/// plugin owns provider-specific authorization URLs, token exchange, and
+/// post-exchange provider onboarding.
+world plugin-auth {
+  import host-http;
+  import host-storage;
+  import host-log;
+  import host-clock;
+
+  export auth-flow: interface {
+    use types.{plugin-error, auth-result};
+    begin: func(
+      redirect-uri: string,
+      state: string,
+      pkce-challenge: option<string>
+    ) -> result<string, plugin-error>;
+    exchange: func(
+      code: string,
+      redirect-uri: string,
+      pkce-verifier: option<string>
+    ) -> result<auth-result, plugin-error>;
   }
 }
 
