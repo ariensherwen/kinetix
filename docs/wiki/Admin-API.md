@@ -144,7 +144,7 @@ Manage WebAssembly Component plugins (`.kxp` packages).
 | `POST /admin/api/plugins/{id}/permissions/approve` | Approve all permissions declared by the plugin manifest (all-or-nothing). |
 | `POST /admin/api/plugins/{id}/permissions/revoke` | Revoke a single permission grant (`{"permission": "..."}`). Disables the plugin while retaining its KV state. |
 | `GET /admin/api/plugins/{id}/audit` | Filtered audit log entries where target is this plugin. |
-| `GET /admin/api/plugins/{id}/metrics` | Plugin metrics: host invocations, faults, timeouts, cancellations, HTTP calls, runtime state, and encrypted KV storage bytes. |
+| `GET /admin/api/plugins/{id}/metrics` | Per-plugin runtime state, storage bytes, host invocation totals, and `by_capability` counters for successes/faults/timeouts/cancellations/HTTP attempts/cumulative duration. |
 
 ## Error shape
 
