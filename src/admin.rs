@@ -4661,7 +4661,7 @@ pub async fn plugin_metrics(
     Path(id): Path<String>,
 ) -> ApiResult {
     let manager = plugin_manager(&state)?;
-    let c = manager.counters();
+    let metrics = manager.metrics_for_plugin(&id);
     let runtime = crate::plugins::store::runtime_state(&state.pool, &id)
         .await
         .map_err(ApiError::internal)?;
@@ -4670,11 +4670,14 @@ pub async fn plugin_metrics(
         .map_err(ApiError::internal)?;
     Ok(Json(json!({
         "id": id,
-        "host_invocations_total": c.invocations,
-        "host_faults_total": c.faults,
-        "host_timeouts_total": c.timeouts,
-        "host_cancellations_total": c.cancellations,
-        "host_http_requests_total": c.http_requests,
+        "host_invocations_total": metrics.totals.invocations,
+        "host_successes_total": metrics.totals.successes,
+        "host_faults_total": metrics.totals.faults,
+        "host_timeouts_total": metrics.totals.timeouts,
+        "host_cancellations_total": metrics.totals.cancellations,
+        "host_http_requests_total": metrics.totals.http_requests,
+        "host_duration_micros_total": metrics.totals.duration_micros,
+        "by_capability": metrics.by_capability,
         "storage_bytes": bytes,
         "runtime": runtime,
     })))
