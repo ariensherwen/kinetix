@@ -40,6 +40,9 @@ export interface Provider {
   followRedirects?: boolean;
   credentialHosts?: string;
   allowInsecureTls?: boolean;
+  wirePlugin?: string;
+  credentialPlugin?: string;
+  modelSourcePlugin?: string;
   /** Write-only: a credential supplied when adding/editing (never returned by the API). */
   apiKey?: string;
   accountLabel?: string;
