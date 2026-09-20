@@ -4166,6 +4166,21 @@ pub async fn plugin_auth_callback(
     Ok(Redirect::to("/admin/plugins?plugin_auth=success"))
 }
 
+/// `GET /admin/api/plugins/{id}/packages/{sha256}/preview` — inspect a retained rollback target.
+pub async fn preview_plugin_rollback(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+    Path((id, sha256)): Path<(String, String)>,
+) -> ApiResult {
+    let manager = plugin_manager(&state)?;
+    let preview = manager
+        .rollback_preview(&id, sha256.trim())
+        .await
+        .map_err(plugin_bad)?;
+    let value = serde_json::to_value(preview).map_err(ApiError::internal)?;
+    Ok(Json(value))
+}
+
 #[derive(Deserialize)]
 pub struct PluginRollbackBody {
     pub sha256: String,
