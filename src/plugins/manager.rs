@@ -43,8 +43,14 @@ impl HostBacking for Backing {
     async fn kv_get(&self, plugin_id: &str, key: &str) -> Result<Option<Vec<u8>>> {
         store::kv_get(&self.pool, &self.crypto, plugin_id, key).await
     }
-    async fn kv_put(&self, plugin_id: &str, key: &str, value: &[u8]) -> Result<()> {
-        store::kv_put(&self.pool, &self.crypto, plugin_id, key, value).await
+    async fn kv_put_limited(
+        &self,
+        plugin_id: &str,
+        key: &str,
+        value: &[u8],
+        quota: u64,
+    ) -> Result<()> {
+        store::kv_put_limited(&self.pool, &self.crypto, plugin_id, key, value, quota).await
     }
     async fn kv_delete(&self, plugin_id: &str, key: &str) -> Result<()> {
         store::kv_delete(&self.pool, plugin_id, key).await
@@ -570,6 +576,7 @@ impl PluginManager {
         let manifest = row
             .manifest()
             .ok_or_else(|| anyhow!("plugin '{id}' has an unreadable manifest"))?;
+        let storage_quota = manifest::effective_limits(&manifest, self.inner.policy)?.storage;
 
         for (key, value) in values {
             let setting = manifest
@@ -611,12 +618,13 @@ impl PluginManager {
             if encoded.len() > 64 * 1024 {
                 bail!("plugin setting '{key}' exceeds 64 KiB");
             }
-            store::kv_put(
+            store::kv_put_limited(
                 &self.inner.pool,
                 &self.inner.crypto,
                 id,
                 &storage_key,
                 encoded.as_bytes(),
+                storage_quota,
             )
             .await?;
         }
