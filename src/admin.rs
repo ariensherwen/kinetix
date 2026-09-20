@@ -745,9 +745,8 @@ async fn provider_plugin_binding_problems(state: &AppState, body: &ProviderBody)
     let model_reference = body.model_source_plugin.trim();
     if !model_reference.is_empty() {
         if crate::plugins::PluginRef::parse(model_reference).is_none() {
-            problems.push(
-                "model_source_plugin must use plugin:<id>/<capability-name> syntax".into(),
-            );
+            problems
+                .push("model_source_plugin must use plugin:<id>/<capability-name> syntax".into());
         } else if let Some(manager) = state.plugin_manager() {
             let account_aware = manager
                 .resolve_binding(model_reference, Capability::AccountModelSource)
@@ -977,10 +976,7 @@ pub async fn discover_models(
             let manager = plugin_manager(&state)?;
             let reference = format!("plugin:{}/{}", pref.plugin_id, pref.capability);
             let account_aware = manager
-                .resolve_binding(
-                    &reference,
-                    crate::plugins::Capability::AccountModelSource,
-                )
+                .resolve_binding(&reference, crate::plugins::Capability::AccountModelSource)
                 .await
                 .is_some();
             let legacy = manager
