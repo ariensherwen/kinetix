@@ -1770,6 +1770,11 @@ fn build_cached_fact_snapshot(
     pending: std::collections::BTreeMap<String, (String, u64)>,
     observed_at: &str,
 ) -> Result<Vec<(String, Vec<u8>)>, PluginFault> {
+    if facts.len().saturating_add(pending.len()) > 256 {
+        return Err(PluginFault::InvalidResult(
+            "cached routing fact count exceeds 256".into(),
+        ));
+    }
     let mut names = std::collections::HashSet::new();
     let mut snapshot = Vec::with_capacity(facts.len() + pending.len());
 
