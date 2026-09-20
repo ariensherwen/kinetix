@@ -29,6 +29,15 @@ pub mod bindings {
     });
 }
 
+/// Bindings for the optional browser/account authorization world.
+pub mod auth {
+    wit_bindgen::generate!({
+        path: "wit",
+        world: "plugin-auth",
+        pub_export_macro: true,
+    });
+}
+
 /// Bindings for the `plugin-adapter` world (§6.3). A component that provides a
 /// `provider-adapter` capability implements `adapter::exports::provider_adapter::Guest`
 /// and invokes `adapter::export!(Component with_types_in kinetix_plugin_sdk::adapter)`.
