@@ -80,6 +80,8 @@ pub struct DiscoveredModel {
     pub display_name: Option<String>,
     pub context_window: Option<i64>,
     pub max_output_tokens: Option<i64>,
+    pub capabilities: Option<serde_json::Value>,
+    pub raw_metadata: Option<serde_json::Value>,
 }
 
 /// An adapter registry: selects the built-in adapter for a wire format.
