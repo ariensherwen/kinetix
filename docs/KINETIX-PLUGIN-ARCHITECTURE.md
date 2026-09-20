@@ -1257,7 +1257,10 @@ aspiration. It is a living list: update it as later phases land.
 - **Runtime-snapshot integration (§13).** Plugin enable/disable is reflected in
   the plugin store and the in-memory capability maps; folding the plugin registry
   into the same immutable `Snapshot` swap is not yet done.
-- **Dashboard.** No React page for plugins yet; only the admin JSON API.
+- **Dashboard.** The React dashboard now exposes installed plugin management:
+  local `.kxp` upload, permission review/approval, validation, enable/disable,
+  and removal. A remote catalog/discovery experience and declarative
+  plugin-provided integration UI remain follow-up work.
 - **SDK polish (§22).** `plugins/sdk` exists and works, but it is not published
   and does not yet auto-generate stub impls for the interfaces a plugin does not
   provide (a plugin still hand-writes them, as `antigravity-oauth` does).
