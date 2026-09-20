@@ -2883,14 +2883,30 @@ fn is_blocked_host(host: &str) -> bool {
 pub fn is_blocked_ip(ip: std::net::IpAddr) -> bool {
     match ip {
         std::net::IpAddr::V4(v4) => {
+            let [a, b, _, _] = v4.octets();
             v4.is_loopback()
                 || v4.is_private()
                 || v4.is_link_local()
                 || v4.is_unspecified()
                 || v4.is_broadcast()
-                || v4.octets()[0] == 169 && v4.octets()[1] == 254
+                || v4.is_multicast()
+                || v4.is_documentation()
+                || a == 0
+                || (a == 100 && (64..=127).contains(&b))
+                || (a == 192 && b == 0)
+                || (a == 198 && (b == 18 || b == 19))
+                || a >= 240
         }
-        std::net::IpAddr::V6(v6) => v6.is_loopback() || v6.is_unspecified(),
+        std::net::IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_blocked_ip(std::net::IpAddr::V4(v4));
+            }
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_unique_local()
+                || v6.is_unicast_link_local()
+                || v6.is_multicast()
+        }
     }
 }
 
