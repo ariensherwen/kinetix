@@ -17,6 +17,7 @@ pub const MANIFEST_VERSION: u32 = 1;
 #[serde(rename_all = "snake_case")]
 pub enum Capability {
     CredentialStrategy,
+    AuthFlow,
     ModelSource,
     ProviderAdapter,
     RoutingFacts,
@@ -29,6 +30,7 @@ impl Capability {
     pub fn manifest_key(&self) -> &'static str {
         match self {
             Capability::CredentialStrategy => "credential_strategies",
+            Capability::AuthFlow => "auth_flows",
             Capability::ModelSource => "model_sources",
             Capability::ProviderAdapter => "provider_adapters",
             Capability::RoutingFacts => "routing_facts",
@@ -160,6 +162,8 @@ pub struct Integration {
     #[serde(default)]
     pub credential_strategy: Option<String>,
     #[serde(default)]
+    pub auth_flow: Option<String>,
+    #[serde(default)]
     pub model_source: Option<String>,
 }
 
@@ -194,6 +198,8 @@ pub struct Provides {
     #[serde(default)]
     pub credential_strategies: Vec<String>,
     #[serde(default)]
+    pub auth_flows: Vec<String>,
+    #[serde(default)]
     pub model_sources: Vec<String>,
     #[serde(default)]
     pub provider_adapters: Vec<String>,
@@ -217,6 +223,7 @@ impl Provides {
             }
         };
         add(Capability::CredentialStrategy, &self.credential_strategies);
+        add(Capability::AuthFlow, &self.auth_flows);
         add(Capability::ModelSource, &self.model_sources);
         add(Capability::ProviderAdapter, &self.provider_adapters);
         add(Capability::RoutingFacts, &self.routing_facts);
