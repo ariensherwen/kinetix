@@ -207,6 +207,32 @@ dashboard a safe vocabulary for presenting "Google Antigravity" instead of
 requiring operators to manually compose `wire_plugin` and
 `credential_plugin` references.
 
+### 6.0.2 AuthFlow
+
+Purpose:
+
+- start a provider-owned browser authorization flow for an admin-selected
+  integration/provider binding;
+- exchange the resulting authorization code for credential material;
+- optionally fetch provider user metadata needed to label or finish account
+  enrollment.
+
+AuthFlow is a separate `plugin-auth` world rather than another export on the
+main `plugin` world. This preserves API-v1 compatibility for existing
+components.
+
+Security ownership is split deliberately:
+
+- **core** generates and stores one-time CSRF state and PKCE verifier material,
+  enforces expiry, validates the callback, validates/bounds the returned JSON,
+  encrypts it, and inserts the account;
+- **plugin** constructs the provider URL and performs provider-specific token
+  exchange/post-exchange calls through its approved `host-http` authority.
+
+A callback may only enroll into a provider whose `credential_plugin` exactly
+matches the credential strategy paired with the integration. The state token
+is consumed before exchange so callback replay fails closed.
+
 ### 6.1 CredentialStrategy
 
 Purpose:
