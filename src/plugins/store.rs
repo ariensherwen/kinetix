@@ -545,6 +545,13 @@ pub async fn kv_replace_prefix_limited(
     if entries.iter().any(|(key, _)| !key.starts_with(prefix)) {
         bail!("KV snapshot entry is outside the requested prefix");
     }
+    let mut unique_keys = std::collections::HashSet::new();
+    if entries
+        .iter()
+        .any(|(key, _)| !unique_keys.insert(key.as_str()))
+    {
+        bail!("KV snapshot contains duplicate keys");
+    }
 
     let mut encoded_entries = Vec::with_capacity(entries.len());
     for (key, value) in entries {
@@ -589,11 +596,15 @@ pub async fn kv_replace_prefix_limited(
             bail!("storage quota exceeded: projected {used} bytes exceeds {quota} bytes");
         }
 
-        sqlx::query("DELETE FROM plugin_kv WHERE plugin_id = ? AND key LIKE ?")
-            .bind(plugin_id)
-            .bind(format!("{prefix}%"))
-            .execute(&mut *conn)
-            .await?;
+        sqlx::query(
+            "DELETE FROM plugin_kv
+             WHERE plugin_id = ? AND substr(key, 1, ?) = ?",
+        )
+        .bind(plugin_id)
+        .bind(prefix.len() as i64)
+        .bind(prefix)
+        .execute(&mut *conn)
+        .await?;
 
         let now = crate::db::now_iso();
         for (key, encrypted, _) in &encoded_entries {
@@ -664,10 +675,13 @@ pub async fn kv_list_prefix(
     prefix: &str,
 ) -> Result<Vec<(String, Vec<u8>)>> {
     let rows = sqlx::query(
-        "SELECT key, value FROM plugin_kv WHERE plugin_id = ? AND key LIKE ? ORDER BY key",
+        "SELECT key, value FROM plugin_kv
+         WHERE plugin_id = ? AND substr(key, 1, ?) = ?
+         ORDER BY key",
     )
     .bind(plugin_id)
-    .bind(format!("{prefix}%"))
+    .bind(prefix.len() as i64)
+    .bind(prefix)
     .fetch_all(pool)
     .await?;
     let mut out = Vec::new();
