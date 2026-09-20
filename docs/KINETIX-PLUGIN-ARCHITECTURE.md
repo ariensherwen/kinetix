@@ -315,6 +315,25 @@ Core rules remain:
 - `raw_metadata` is bounded by the returned-value limit (§14) and is kept only for admin inspection,
   never promoted into canonical model fields without an explicit import action.
 
+### 6.2.1 Credential-aware ModelSource v2
+
+API-v1 `ModelSource::discover(provider_id, base_url, models_path)` is retained
+for sources that do not require account identity. Credentialed discovery uses a
+separate optional WIT world, `plugin-model-source-v2`, with:
+
+```text
+discover(provider_id, account_id, base_url, models_path)
+```
+
+This avoids changing the required exports of the existing `plugin` world.
+The host selects the account and continues to enforce approved
+`credential_scopes`, `credential_read`, network hosts, request budgets, body
+limits, deadlines, and circuit accounting. A provider's namespaced
+`model_source_plugin` binding may resolve to either `model_sources_v2` or the
+legacy `model_sources`; v2 takes precedence when both names happen to exist.
+
+An Integration must not declare both `model_source` and `model_source_v2`.
+
 ### 6.3 ProviderAdapter
 
 Use only when existing outbound wire formats are insufficient.
