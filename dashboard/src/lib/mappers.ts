@@ -65,6 +65,9 @@ export function mapProvider(j: any): Provider {
     followRedirects: !!j.follow_redirects,
     credentialHosts: str(j.credential_hosts),
     allowInsecureTls: !!j.allow_insecure_tls,
+    wirePlugin: str(j.wire_plugin),
+    credentialPlugin: str(j.credential_plugin),
+    modelSourcePlugin: str(j.model_source_plugin),
     lastPingMs: 0,
   };
 }
