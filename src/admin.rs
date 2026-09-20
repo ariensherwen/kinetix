@@ -3587,9 +3587,188 @@ pub(crate) async fn register_enabled_plugin_capabilities(state: &AppState, id: &
 /// Catalog metadata is not a package trust root. Installation continues to use
 /// the normal SHA/signature/permission-review pipeline.
 pub async fn plugin_catalog(_auth: AdminAuth) -> ApiResult {
-    let catalog: Value = serde_json::from_str(include_str!("../plugins/catalog.json"))
-        .map_err(ApiError::internal)?;
-    Ok(Json(catalog))
+    let catalog = crate::plugins::catalog::embedded_catalog().map_err(ApiError::internal)?;
+    let trust = crate::plugins::catalog::embedded_trust_store().map_err(ApiError::internal)?;
+
+    let mut plugins = Vec::with_capacity(catalog.plugins.len());
+    for plugin in catalog.plugins {
+        let ready =
+            crate::plugins::catalog::install_ready(&plugin, &trust).map_err(ApiError::internal)?;
+        let mut value = serde_json::to_value(&plugin).map_err(ApiError::internal)?;
+        value["install_ready"] = json!(ready);
+        value["trust_status"] = json!(if ready {
+            "trusted"
+        } else if plugin.installable {
+            "unavailable"
+        } else {
+            "discovery_only"
+        });
+        plugins.push(value);
+    }
+
+    Ok(Json(json!({
+        "schema_version": catalog.schema_version,
+        "plugins": plugins,
+    })))
+}
+
+async fn download_catalog_package(
+    state: &AppState,
+    distribution: &crate::plugins::catalog::CatalogDistribution,
+) -> Result<Vec<u8>, ApiError> {
+    let mut url = url::Url::parse(&distribution.url)
+        .map_err(|e| ApiError::bad(format!("invalid catalog artifact URL: {e}")))?;
+
+    for redirect_count in 0..=5 {
+        crate::plugins::catalog::validate_download_url(distribution, &url)
+            .map_err(plugin_bad)?;
+
+        let mut response = state
+            .http
+            .get(url.clone())
+            .timeout(std::time::Duration::from_secs(60))
+            .send()
+            .await
+            .map_err(|e| ApiError::bad(format!("catalog artifact download failed: {e}")))?;
+
+        if response.status().is_redirection() {
+            if redirect_count == 5 {
+                return Err(ApiError::bad("catalog artifact exceeded redirect limit"));
+            }
+            let location = response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|value| value.to_str().ok())
+                .ok_or_else(|| ApiError::bad("catalog artifact redirect has no valid Location"))?;
+            url = url
+                .join(location)
+                .map_err(|e| ApiError::bad(format!("invalid catalog artifact redirect: {e}")))?;
+            continue;
+        }
+
+        if !response.status().is_success() {
+            return Err(ApiError::bad(format!(
+                "catalog artifact returned HTTP {}",
+                response.status()
+            )));
+        }
+
+        if response
+            .content_length()
+            .is_some_and(|length| length > crate::plugins::package::MAX_PACKAGE_BYTES)
+        {
+            return Err(ApiError::bad("catalog artifact exceeds package size limit"));
+        }
+
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|e| ApiError::bad(format!("reading catalog artifact failed: {e}")))?
+        {
+            if bytes.len() as u64 + chunk.len() as u64
+                > crate::plugins::package::MAX_PACKAGE_BYTES
+            {
+                return Err(ApiError::bad("catalog artifact exceeds package size limit"));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        return Ok(bytes);
+    }
+
+    Err(ApiError::bad("catalog artifact download failed"))
+}
+
+/// `POST /admin/api/plugins/catalog/{id}/install` — install a trusted catalog package.
+pub async fn install_catalog_plugin(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+    Path(id): Path<String>,
+) -> ApiResult {
+    let manager = plugin_manager(&state)?;
+    let plugin = crate::plugins::catalog::find_plugin(&id).map_err(plugin_bad)?;
+    let distribution = plugin
+        .distribution
+        .as_ref()
+        .ok_or_else(|| ApiError::bad("catalog plugin has no installable distribution"))?;
+    let trust = crate::plugins::catalog::embedded_trust_store().map_err(ApiError::internal)?;
+    if !crate::plugins::catalog::install_ready(&plugin, &trust).map_err(plugin_bad)? {
+        return Err(ApiError::bad(
+            "catalog plugin is not install-ready: signed artifact metadata or publisher trust is unavailable",
+        ));
+    }
+    let key = crate::plugins::catalog::trusted_key(&trust, &plugin)
+        .map_err(plugin_bad)?
+        .ok_or_else(|| ApiError::bad("catalog publisher key is not trusted"))?;
+
+    let bytes = download_catalog_package(&state, distribution).await?;
+    let pkg = crate::plugins::package::read_package(&bytes).map_err(plugin_bad)?;
+    if !distribution
+        .sha256
+        .eq_ignore_ascii_case(&pkg.package_sha256)
+    {
+        return Err(ApiError::bad(format!(
+            "catalog package hash mismatch: expected {}, computed {}",
+            distribution.sha256, pkg.package_sha256
+        )));
+    }
+    let validated =
+        crate::plugins::package::validate_manifest(&pkg, manager.policy()).map_err(plugin_bad)?;
+    if validated.manifest.id != plugin.id {
+        return Err(ApiError::bad(format!(
+            "catalog artifact id mismatch: expected '{}', package declares '{}'",
+            plugin.id, validated.manifest.id
+        )));
+    }
+    if validated.manifest.version != plugin.latest_version {
+        return Err(ApiError::bad(format!(
+            "catalog artifact version mismatch: expected '{}', package declares '{}'",
+            plugin.latest_version, validated.manifest.version
+        )));
+    }
+    let signature = crate::plugins::package::verify_signature(&pkg, &[key]).map_err(plugin_bad)?;
+    if signature != crate::plugins::package::SignatureStatus::Verified {
+        return Err(ApiError::bad(
+            "catalog package is not signed by its trusted publisher key",
+        ));
+    }
+
+    let source = format!("catalog:{}@{}", plugin.id, plugin.latest_version);
+    let outcome = manager
+        .install_from_source(
+            &bytes,
+            Some(&distribution.sha256),
+            &[key],
+            false,
+            &source,
+        )
+        .await
+        .map_err(plugin_bad)?;
+
+    let _ = db::insert_audit(
+        &state.pool,
+        "admin",
+        "plugin_catalog_installed",
+        "plugin",
+        &outcome.id,
+        &outcome.id,
+        &format!(
+            "Installed trusted catalog plugin {} v{} (SHA-256 {}). Installed disabled pending permission review.",
+            outcome.id, outcome.version, outcome.package_sha256
+        ),
+    )
+    .await;
+
+    Ok(Json(json!({
+        "id": outcome.id,
+        "version": outcome.version,
+        "sha256": outcome.package_sha256,
+        "signature": outcome.signature.as_str(),
+        "provides": outcome.provides,
+        "enabled": false,
+        "source": source,
+        "note": "trusted catalog package installed disabled; review permissions before enabling",
+    })))
 }
 
 /// `GET /admin/api/plugins` — list installed plugins.
