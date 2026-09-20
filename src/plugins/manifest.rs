@@ -277,8 +277,8 @@ pub fn validate(manifest: Manifest, policy: HostPolicy) -> Result<ValidatedManif
             }
             for (name, value) in &provider.extra_headers {
                 if name.trim().is_empty()
-                    || name.contains(['\r', '\n', ':'])
-                    || value.contains(['\r', '\n'])
+                    || name.chars().any(|c| matches!(c, '\r' | '\n' | ':'))
+                    || value.chars().any(|c| matches!(c, '\r' | '\n'))
                 {
                     bail!(
                         "integration '{}' provider contains an invalid extra header",
