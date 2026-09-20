@@ -168,6 +168,25 @@ impl PluginManager {
         trusted_keys: &[[u8; 32]],
         allow_untrusted_signature: bool,
     ) -> Result<InstallOutcome> {
+        self.install_from_source(
+            bytes,
+            expected_sha256,
+            trusted_keys,
+            allow_untrusted_signature,
+            "local",
+        )
+        .await
+    }
+
+    /// Install package bytes while retaining an operator-safe provenance label.
+    pub async fn install_from_source(
+        &self,
+        bytes: &[u8],
+        expected_sha256: Option<&str>,
+        trusted_keys: &[[u8; 32]],
+        allow_untrusted_signature: bool,
+        source: &str,
+    ) -> Result<InstallOutcome> {
         let pkg = package::read_package(bytes)?;
         if let Some(expected) = expected_sha256 {
             if !expected.eq_ignore_ascii_case(&pkg.package_sha256) {
@@ -204,6 +223,7 @@ impl PluginManager {
             &pkg.component,
             sig.as_str(),
             &package_path,
+            source,
         )
         .await?;
 
