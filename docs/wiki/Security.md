@@ -23,7 +23,7 @@ policy. It listens on localhost only, with cloudflared as the sole ingress.
 | SSRF / DNS rebinding / malicious redirect | HTTPS-only, blocked internal/metadata ranges, connect-time DNS re-check, zero-redirect default, credential host binding. |
 | Topology leakage | Serving account/provider hidden from clients; opaque `X-Kinetix-Route-Id` only. |
 | Control-plane failure | Data plane serves from an immutable snapshot; reads keep working; counters fail open. |
-| Malicious or faulty plugin | WebAssembly component isolation (Wasmtime 48), zero ambient authority, all-or-nothing permissions, encrypted private KV, epoch interruption, and per-plugin circuit breaker. |
+| Malicious or faulty plugin | WebAssembly component isolation (Wasmtime 48), zero ambient authority, all-or-nothing permissions, encrypted private KV, epoch interruption, per-plugin circuit breaker, and DNS-pinned host-mediated HTTP with private/reserved address blocking. |
 
 Out of scope: hostile insiders with shell/root, upstream-provider compromise, and
 hard multi-tenant isolation.
@@ -35,8 +35,11 @@ hard multi-tenant isolation.
 - **Zero-redirect default**; redirects must be enabled per provider and are
   revalidated (NFR-3.10).
 - **Credential host binding** (NFR-3.11).
-- **Connect-time DNS re-check** against policy (NFR-3.9), with a documented
-  residual TOCTOU window.
+- **Connect-time DNS re-check** against policy for native provider traffic
+  (NFR-3.9), with its documented residual TOCTOU window.
+- **Plugin HTTP DNS pinning**: host-mediated plugin requests reject mixed
+  public/private DNS answers and pin the actual reqwest connection to the
+  validated addresses; system proxies and redirects are disabled.
 - **Write-only admin credentials**: a raw admin password is accepted only from the
   header, never the cookie (NFR-3.14).
 - **Per-IP abuse limit** before virtual-key auth (NFR-3.6).
