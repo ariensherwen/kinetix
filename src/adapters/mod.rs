@@ -111,6 +111,9 @@ impl AdapterRegistry {
             WireFormat::Gemini => self.gemini.clone(),
             WireFormat::Openai => self.openai.clone(),
             WireFormat::Anthropic => self.anthropic.clone(),
+            WireFormat::Plugin => Arc::new(UnimplementedAdapter {
+                format: "plugin adapter binding required",
+            }),
         }
     }
 
