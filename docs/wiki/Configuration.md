@@ -87,7 +87,7 @@ custom_header_name = "x-goog-api-key"
 [[providers]]
 name = "Google Antigravity"
 base_url = "https://autopush-alkalimakersuite-pa.sandbox.googleapis.com"
-wire_format = "antigravity"
+wire_format = "plugin"
 auth_scheme = "bearer"
 wire_plugin = "plugin:dev.kinetix.antigravity-oauth/antigravity"
 credential_plugin = "plugin:dev.kinetix.antigravity-oauth/antigravity-oauth"
