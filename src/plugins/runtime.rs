@@ -721,6 +721,50 @@ mod tests {
         );
     }
 
+    fn test_ctx(buffered_http_allowed: bool, network_hosts: Vec<String>) -> HostCtx {
+        HostCtx {
+            plugin_id: "test".into(),
+            network_hosts,
+            credential_read: false,
+            credential_sign: false,
+            credential_scopes: vec![],
+            storage_quota: 1024,
+            max_outbound_requests: 1,
+            max_http_body: 1024,
+            adapter_stream: false,
+            buffered_http_allowed,
+            outbound_count: 0,
+            http: reqwest::Client::new(),
+            backing: std::sync::Arc::new(NoBacking),
+            limits: wasmtime::StoreLimitsBuilder::new().build(),
+        }
+    }
+
+    #[tokio::test]
+    async fn buffered_http_is_scoped_to_the_current_capability() {
+        use bindings::kinetix::plugin::host_http::Host;
+
+        let req = wit::types::HttpRequest {
+            method: "GET".into(),
+            url: "https://oauth2.googleapis.com/token".into(),
+            headers: vec![],
+            body: vec![],
+            credential: None,
+        };
+
+        let mut denied = test_ctx(false, vec!["oauth2.googleapis.com".into()]);
+        let err = denied.send(req.clone()).await.unwrap().unwrap_err();
+        assert_eq!(err.code, "permission_denied");
+        assert!(err.message.contains("not available to this plugin capability"));
+
+        // With capability-level HTTP enabled, the request advances to the
+        // manifest host allow-list instead of being rejected by routing policy.
+        let mut allowed_capability = test_ctx(true, vec!["api.example.com".into()]);
+        let err = allowed_capability.send(req).await.unwrap().unwrap_err();
+        assert_eq!(err.code, "permission_denied");
+        assert!(err.message.contains("network_hosts"));
+    }
+
     struct NoBacking;
     #[async_trait::async_trait]
     impl HostBacking for NoBacking {
