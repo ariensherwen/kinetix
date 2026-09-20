@@ -5,6 +5,7 @@
 //! Wasmtime for request-path work, and it always maps guest results into typed
 //! evidence that core policy consumes.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,7 +22,7 @@ use super::runtime::{
     bindings, wit, DeadlineGuard, HostBacking, HostCtx, PluginFault, PluginRuntime, CONFIG_PREFIX,
 };
 use super::store::{self, PermissionGrant, PluginRow};
-use super::types::{Capability, CircuitState, Limits, Manifest, Provided};
+use super::types::{Capability, CircuitState, Limits, Manifest, Permissions, Provided};
 
 /// Bounds concurrent guest invocations so a flood of one plugin cannot exhaust
 /// host threads or memory (§14).
@@ -293,21 +294,11 @@ impl PluginManager {
         Ok(relative.to_string_lossy().into_owned())
     }
 
-    /// Reactivate an exact retained package as the active plugin version.
-    ///
-    /// Historical acceptance is not enough by itself: the retained bytes are
-    /// re-hashed, the manifest identity/version are checked against provenance,
-    /// and the component is recompiled. Activation goes through `upsert_plugin`,
-    /// which disables the plugin and clears all permission grants.
-    pub async fn rollback(&self, id: &str, sha256: &str) -> Result<RollbackOutcome> {
-        let current = self
-            .get(id)
-            .await?
-            .ok_or_else(|| anyhow!("plugin '{id}' is not installed"))?;
-        if current.package_sha256.eq_ignore_ascii_case(sha256) {
-            bail!("plugin '{id}' is already using package {sha256}");
-        }
-
+    async fn load_retained_package(
+        &self,
+        id: &str,
+        sha256: &str,
+    ) -> Result<(store::PackageRow, Package, manifest::ValidatedManifest)> {
         let retained = store::get_package(&self.inner.pool, id, sha256)
             .await?
             .ok_or_else(|| anyhow!("retained package '{sha256}' not found for plugin '{id}'"))?;
@@ -351,6 +342,54 @@ impl PluginManager {
                 validated.manifest.version
             );
         }
+
+        Ok((retained, pkg, validated))
+    }
+
+    /// Preview a retained package and the authority delta relative to the
+    /// currently active manifest without changing runtime state.
+    pub async fn rollback_preview(&self, id: &str, sha256: &str) -> Result<RollbackPreview> {
+        let current = self
+            .get(id)
+            .await?
+            .ok_or_else(|| anyhow!("plugin '{id}' is not installed"))?;
+        let current_manifest = current
+            .manifest()
+            .ok_or_else(|| anyhow!("plugin '{id}' has an unreadable manifest"))?;
+        let (retained, _pkg, validated) = self.load_retained_package(id, sha256).await?;
+
+        Ok(RollbackPreview {
+            id: id.to_string(),
+            current_version: current.version,
+            target_version: retained.version,
+            package_sha256: retained.package_sha256,
+            signature: retained.signature,
+            source: retained.source,
+            permissions: validated.manifest.permissions.clone(),
+            permission_diff: permission_diff(
+                &current_manifest.permissions,
+                &validated.manifest.permissions,
+            ),
+            provides: validated.manifest.provides.provided(),
+        })
+    }
+
+    /// Reactivate an exact retained package as the active plugin version.
+    ///
+    /// Historical acceptance is not enough by itself: the retained bytes are
+    /// re-hashed, the manifest identity/version are checked against provenance,
+    /// and the component is recompiled. Activation goes through `upsert_plugin`,
+    /// which disables the plugin and clears all permission grants.
+    pub async fn rollback(&self, id: &str, sha256: &str) -> Result<RollbackOutcome> {
+        let current = self
+            .get(id)
+            .await?
+            .ok_or_else(|| anyhow!("plugin '{id}' is not installed"))?;
+        if current.package_sha256.eq_ignore_ascii_case(sha256) {
+            bail!("plugin '{id}' is already using package {sha256}");
+        }
+
+        let (retained, pkg, validated) = self.load_retained_package(id, sha256).await?;
 
         self.inner
             .runtime
@@ -1516,6 +1555,63 @@ pub struct PluginCounters {
     pub timeouts: u64,
     pub cancellations: u64,
     pub http_requests: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PermissionListDiff {
+    pub added: Vec<String>,
+    pub removed: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PermissionBoolDiff {
+    pub from: bool,
+    pub to: bool,
+    pub changed: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PermissionDiff {
+    pub network_hosts: PermissionListDiff,
+    pub credential_scopes: PermissionListDiff,
+    pub credential_read: PermissionBoolDiff,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RollbackPreview {
+    pub id: String,
+    pub current_version: String,
+    pub target_version: String,
+    pub package_sha256: String,
+    pub signature: String,
+    pub source: String,
+    pub permissions: Permissions,
+    pub permission_diff: PermissionDiff,
+    pub provides: Vec<Provided>,
+}
+
+fn list_permission_diff(from: &[String], to: &[String]) -> PermissionListDiff {
+    let from: BTreeSet<&str> = from.iter().map(String::as_str).collect();
+    let to: BTreeSet<&str> = to.iter().map(String::as_str).collect();
+    PermissionListDiff {
+        added: to.difference(&from).map(|value| (*value).to_string()).collect(),
+        removed: from.difference(&to).map(|value| (*value).to_string()).collect(),
+    }
+}
+
+fn permission_diff(from: &Permissions, to: &Permissions) -> PermissionDiff {
+    PermissionDiff {
+        network_hosts: list_permission_diff(&from.network_hosts, &to.network_hosts),
+        credential_scopes: list_permission_diff(
+            &from.credential_scopes,
+            &to.credential_scopes,
+        ),
+        credential_read: PermissionBoolDiff {
+            from: from.credential_read,
+            to: to.credential_read,
+            changed: from.credential_read != to.credential_read,
+        },
+    }
 }
 
 /// The outcome of reactivating a retained package.
