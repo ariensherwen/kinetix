@@ -127,6 +127,10 @@ pub fn build(state: AppState) -> Router {
         // plugins (post-v1; docs/KINETIX-PLUGIN-ARCHITECTURE.md §20)
         .route("/plugins", get(admin::list_plugins))
         .route("/plugins/catalog", get(admin::plugin_catalog))
+        .route(
+            "/plugins/catalog/{id}/install",
+            post(admin::install_catalog_plugin),
+        )
         .route("/plugins/install", post(admin::install_plugin))
         .route("/plugins/auth/start", post(admin::start_plugin_auth))
         .route("/plugins/auth/callback", get(admin::plugin_auth_callback))
