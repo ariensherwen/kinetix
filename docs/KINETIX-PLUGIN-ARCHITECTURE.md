@@ -976,20 +976,39 @@ target, force fallback, or move the commit point.
 
 ## 18. Audit and observability
 
-Metrics:
+The host keeps in-memory counters keyed by `(plugin_id, capability)`.
+`GET /admin/api/plugins/{id}/metrics` returns per-plugin totals and a
+`by_capability` breakdown with:
+
+```text
+invocations
+successes
+faults
+timeouts
+cancellations
+host-http request attempts
+cumulative duration in microseconds
+```
+
+Capability labels are host-owned bounded values such as `auth_flow`,
+`provider_adapter`, `credential_strategy`, `model_source`,
+`health_probe`, `routing_facts`, and the three typed hooks. A plugin cannot
+invent metric label cardinality.
+
+Host-mediated HTTP is counted at the actual network-send boundary and attributed
+to the current plugin/capability. Package validation and enable-time linking use
+the `validation` context but do not increment guest invocation counters.
+
+A future Prometheus rendering may expose the same bounded registry as:
 
 ```text
 kinetix_plugin_invocations_total{plugin,capability,outcome}
 kinetix_plugin_duration_seconds{plugin,capability}
-kinetix_plugin_traps_total{plugin}
-kinetix_plugin_timeouts_total{plugin}
+kinetix_plugin_timeouts_total{plugin,capability}
+kinetix_plugin_http_requests_total{plugin,capability}
 kinetix_plugin_circuit_state{plugin}
-kinetix_plugin_http_requests_total{plugin,host,outcome}
 kinetix_plugin_storage_bytes{plugin}
 ```
-
-`host` is bounded because it can only ever be one of the plugin's declared `network_hosts`; the host
-enforces that bound so the label cannot explode in cardinality.
 
 Admin-visible invocation record:
 
