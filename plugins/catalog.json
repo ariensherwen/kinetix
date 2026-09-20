@@ -13,7 +13,8 @@
       "capabilities": [
         "credential_strategy",
         "auth_flow",
-        "provider_adapter"
+        "provider_adapter",
+        "model_source"
       ],
       "installable": false,
       "note": "Official catalog metadata is available now; signed release-asset installation is a separate trust/distribution step."
