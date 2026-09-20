@@ -15,6 +15,11 @@ That world is a **pure translation library**: Kinetix core owns the outbound HTT
 send and SSE framing, and the adapter only builds the URL/body/headers and parses
 stream/error responses. It imports no network capability at all.
 
+The manifest groups those two low-level capabilities into the
+`antigravity` integration descriptor. Dashboard clients can therefore present
+one user-facing **Google Antigravity** integration instead of exposing separate
+wire-adapter and credential-strategy names.
+
 ## Credential format
 
 Import each Antigravity account's secret as JSON:
