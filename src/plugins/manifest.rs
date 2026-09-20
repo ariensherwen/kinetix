@@ -110,6 +110,7 @@ pub fn validate(manifest: Manifest, policy: HostPolicy) -> Result<ValidatedManif
         }
         if integration.provider_adapter.is_none()
             && integration.credential_strategy.is_none()
+            && integration.auth_flow.is_none()
             && integration.model_source.is_none()
         {
             bail!(
@@ -130,6 +131,15 @@ pub fn validate(manifest: Manifest, policy: HostPolicy) -> Result<ValidatedManif
             if !manifest.provides.credential_strategies.contains(name) {
                 bail!(
                     "integration '{}' references unknown credential_strategy '{}'",
+                    integration.id,
+                    name
+                );
+            }
+        }
+        if let Some(name) = &integration.auth_flow {
+            if !manifest.provides.auth_flows.contains(name) {
+                bail!(
+                    "integration '{}' references unknown auth_flow '{}'",
                     integration.id,
                     name
                 );
