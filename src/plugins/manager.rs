@@ -314,9 +314,9 @@ impl PluginManager {
 
         let relative = Path::new(&retained.package_path);
         if relative.is_absolute()
-            || relative.components().any(|component| {
-                !matches!(component, std::path::Component::Normal(_))
-            })
+            || relative
+                .components()
+                .any(|component| !matches!(component, std::path::Component::Normal(_)))
         {
             bail!("retained package path is invalid");
         }
