@@ -41,7 +41,6 @@ struct PluginMetricCell {
     faults: std::sync::atomic::AtomicU64,
     timeouts: std::sync::atomic::AtomicU64,
     cancellations: std::sync::atomic::AtomicU64,
-    http_requests: std::sync::atomic::AtomicU64,
     duration_micros: std::sync::atomic::AtomicU64,
 }
 
@@ -202,7 +201,6 @@ impl PluginManager {
                 faults: Default::default(),
                 timeouts: Default::default(),
                 cancellations: Default::default(),
-                http_requests: Default::default(),
             }),
         })
     }
@@ -218,7 +216,12 @@ impl PluginManager {
             faults: self.inner.faults.load(Relaxed),
             timeouts: self.inner.timeouts.load(Relaxed),
             cancellations: self.inner.cancellations.load(Relaxed),
-            http_requests: self.inner.http_requests.load(Relaxed),
+            http_requests: self
+                .inner
+                .metrics
+                .iter()
+                .map(|entry| entry.value().http_requests.load(Relaxed))
+                .sum(),
         }
     }
 
@@ -1284,22 +1287,45 @@ impl PluginManager {
         self.settle_cancellable(id, "provider_adapter", started, &guard, res).await
     }
 
+    fn observe_duration(
+        &self,
+        id: &str,
+        capability: &str,
+        started: Instant,
+    ) -> Arc<PluginMetricCell> {
+        use std::sync::atomic::Ordering::Relaxed;
+        let cell = metric_cell(&self.inner.metrics, id, capability);
+        let micros = started.elapsed().as_micros().min(u64::MAX as u128) as u64;
+        cell.duration_micros.fetch_add(micros, Relaxed);
+        cell
+    }
+
     /// Record a successful invocation, closing the breaker.
-    async fn record_success(&self, id: &str) {
+    async fn record_success(&self, id: &str, capability: &str, started: Instant) {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.observe_duration(id, capability, started)
+            .successes
+            .fetch_add(1, Relaxed);
         let _ = store::clear_plugin_failures(&self.inner.pool, id).await;
     }
 
     /// Record a fault and trip the breaker when the threshold is reached (§15).
-    async fn record_fault(&self, id: &str, fault: &PluginFault) {
+    async fn record_fault(
+        &self,
+        id: &str,
+        capability: &str,
+        started: Instant,
+        fault: &PluginFault,
+    ) {
         use std::sync::atomic::Ordering::Relaxed;
         self.inner.faults.fetch_add(1, Relaxed);
+        let cell = self.observe_duration(id, capability, started);
+        cell.faults.fetch_add(1, Relaxed);
         if matches!(fault, PluginFault::Timeout) {
             self.inner.timeouts.fetch_add(1, Relaxed);
+            cell.timeouts.fetch_add(1, Relaxed);
         }
         if !fault.counts_against_circuit() {
-            // A structured plugin/upstream error proves the guest executed
-            // successfully. It breaks any consecutive runtime-fault streak and
-            // closes a half-open probe.
             let _ = store::clear_plugin_failures(&self.inner.pool, id).await;
             return;
         }
@@ -1313,9 +1339,13 @@ impl PluginManager {
         .await;
     }
 
-    fn bump_invocation(&self) {
+    fn bump_invocation(&self, id: &str, capability: &str) -> Instant {
         use std::sync::atomic::Ordering::Relaxed;
         self.inner.invocations.fetch_add(1, Relaxed);
+        metric_cell(&self.inner.metrics, id, capability)
+            .invocations
+            .fetch_add(1, Relaxed);
+        Instant::now()
     }
 
     // -----------------------------------------------------------------------
@@ -1563,49 +1593,51 @@ impl PluginManager {
         }
     }
 
-    async fn settle<T>(&self, id: &str, res: Result<T, PluginFault>) -> Result<T, PluginFault> {
+    async fn settle<T>(
+        &self,
+        id: &str,
+        capability: &str,
+        started: Instant,
+        res: Result<T, PluginFault>,
+    ) -> Result<T, PluginFault> {
         match res {
             Ok(v) => {
-                self.record_success(id).await;
+                self.record_success(id, capability, started).await;
                 Ok(v)
             }
             Err(fault) => {
-                self.record_fault(id, &fault).await;
+                self.record_fault(id, capability, started, &fault).await;
                 Err(fault)
             }
         }
     }
 
-    /// As [`settle`], but a cancellation is never counted as a fault (§7.2):
-    /// when the client disconnects the guest is epoch-interrupted, and that
-    /// termination must not move the plugin toward an open circuit.
+    /// Cancellation-aware settlement for request-path plugin calls.
     async fn settle_cancellable<T>(
         &self,
         id: &str,
+        capability: &str,
+        started: Instant,
         guard: &DeadlineGuard,
         res: Result<T, PluginFault>,
     ) -> Result<T, PluginFault> {
         match res {
             Ok(v) => {
-                self.record_success(id).await;
+                self.record_success(id, capability, started).await;
                 Ok(v)
             }
             Err(fault) => {
                 if guard.is_cancelled() {
-                    // Client-driven cancellation: recorded as a cancellation, not
-                    // a plugin fault (AC: a disconnect must not count as a fault).
-                    self.inner
+                    use std::sync::atomic::Ordering::Relaxed;
+                    self.inner.cancellations.fetch_add(1, Relaxed);
+                    self.observe_duration(id, capability, started)
                         .cancellations
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    // Cancellation is not a plugin fault, but if this was the
-                    // sole half-open probe it also is not recovery evidence.
-                    // Reopen for another cooldown instead of stranding the
-                    // breaker in half_open forever.
+                        .fetch_add(1, Relaxed);
                     let _ =
                         store::reopen_plugin_circuit(&self.inner.pool, id, CIRCUIT_OPEN_SECS).await;
                     return Err(PluginFault::Cancelled);
                 }
-                self.record_fault(id, &fault).await;
+                self.record_fault(id, capability, started, &fault).await;
                 Err(fault)
             }
         }
