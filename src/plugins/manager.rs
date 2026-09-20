@@ -1801,6 +1801,65 @@ pub fn read_package(path: &std::path::Path) -> Result<Package> {
 mod tests {
     use super::*;
 
+    async fn concurrency_test_manager() -> (PluginManager, Pool, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "kinetix-plugin-concurrency-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let url = format!("sqlite://{}?mode=rwc", dir.join("t.db").display());
+        let pool = crate::db::connect(&url).await.unwrap();
+        let manager = PluginManager::new(
+            pool.clone(),
+            Arc::new(Crypto::new(&[29_u8; 32])),
+            HostPolicy::default(),
+            dir.join("packages"),
+        )
+        .unwrap();
+        (manager, pool, dir)
+    }
+
+    #[tokio::test]
+    async fn one_plugin_cannot_monopolize_global_invocation_capacity() {
+        let (manager, pool, dir) = concurrency_test_manager().await;
+
+        let mut held = Vec::new();
+        for _ in 0..MAX_CONCURRENT_INVOCATIONS_PER_PLUGIN {
+            held.push(manager.acquire_invocation_permits("plugin-a").await);
+        }
+
+        let waiting_manager = manager.clone();
+        let blocked = tokio::spawn(async move {
+            waiting_manager
+                .acquire_invocation_permits("plugin-a")
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(
+            !blocked.is_finished(),
+            "fifth invocation for the same plugin must wait"
+        );
+
+        let other = tokio::time::timeout(
+            Duration::from_millis(100),
+            manager.acquire_invocation_permits("plugin-b"),
+        )
+        .await
+        .expect("another plugin should retain access to global capacity");
+        drop(other);
+
+        drop(held.pop());
+        let released = tokio::time::timeout(Duration::from_millis(100), blocked)
+            .await
+            .expect("waiting same-plugin invocation should resume after a slot is released")
+            .unwrap();
+        drop(released);
+        drop(held);
+
+        pool.close().await;
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[tokio::test]
     async fn backing_allows_credentials_only_for_matching_strategy_binding() {
         let dir = std::env::temp_dir().join(format!(
