@@ -221,6 +221,14 @@ An `auth` action must reference an integration that declares both
 `auth_flow` and `credential_strategy`. The browser never executes guest code
 and never receives the credential returned by the authorization exchange.
 
+### Storage quota
+
+`limits.storage` applies to all encrypted plugin KV values, including normal
+guest storage, cached routing facts, and host-owned `_config:` settings.
+Kinetix measures decrypted value bytes, accounts correctly for key replacement,
+and serializes competing writes so concurrent calls cannot overcommit the
+configured budget.
+
 ### Host-owned settings
 
 Plugins may also declare `[[ui.settings]]` fields of kind `text`, `secret`,
