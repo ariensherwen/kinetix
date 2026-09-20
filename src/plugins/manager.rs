@@ -867,6 +867,35 @@ impl PluginManager {
         })
     }
 
+    /// Instantiate the optional account-aware model discovery world.
+    async fn prepare_model_source(&self, id: &str) -> Result<ModelSourcePrepared> {
+        let row = self
+            .get(id)
+            .await?
+            .ok_or_else(|| anyhow!("plugin '{id}' is not installed"))?;
+        if !row.status().is_enabled() {
+            bail!("plugin '{id}' is not enabled");
+        }
+        let manifest = row
+            .manifest()
+            .ok_or_else(|| anyhow!("plugin '{id}' has an unreadable manifest"))?;
+        let grants = self.ensure_permissions_approved(id, &manifest).await?;
+        let limits = manifest::effective_limits(&manifest, self.inner.policy)?;
+        let component = self.inner.runtime.compile(&row.component)?;
+        let linker = self.inner.runtime.linker()?;
+        let mut store = self.new_store(&row, &limits, &grants, false, true);
+        let plugin = self
+            .inner
+            .runtime
+            .instantiate_model_source(&linker, &mut store, &component)
+            .await?;
+        Ok(ModelSourcePrepared {
+            store,
+            plugin,
+            wall_time: Duration::from_millis(limits.wall_time_ms),
+        })
+    }
+
     /// Instantiate the optional account-authorization world for one call.
     async fn prepare_auth(&self, id: &str) -> Result<AuthPrepared> {
         let row = self
@@ -1262,6 +1291,58 @@ impl PluginManager {
         self.settle(id, res).await
     }
 
+    /// Account-aware model discovery. The explicit account reference lets the
+    /// host enforce credential scope before any secret reaches the guest.
+    pub async fn account_model_discover(
+        &self,
+        id: &str,
+        provider_id: &str,
+        account_id: &str,
+        base_url: &str,
+        models_path: &str,
+    ) -> Result<Vec<wit::types::DiscoveredModel>, PluginFault> {
+        self.bump_invocation();
+        let _permit = self.inner.semaphore.acquire().await;
+        let mut p = self
+            .prepare_model_source(id)
+            .await
+            .map_err(|e| PluginFault::Internal(e.to_string()))?;
+        let plugin = p.plugin;
+        let rt = self.inner.runtime.clone();
+        let _guard = rt.arm_deadline(&mut p.store, Duration::from_secs(30));
+        let account =
+            crate::plugins::runtime::model_source_bindings::kinetix::plugin::types::AccountRef {
+                provider_id: provider_id.to_string(),
+                account_id: account_id.to_string(),
+            };
+        let result = plugin
+            .account_model_source()
+            .call_discover(
+                &mut p.store,
+                provider_id,
+                &account,
+                base_url,
+                models_path,
+            )
+            .await
+            .map_err(map_call_error)
+            .and_then(map_account_model_result)
+            .map(|models| {
+                models
+                    .into_iter()
+                    .map(|model| wit::types::DiscoveredModel {
+                        id: model.id,
+                        display_name: model.display_name,
+                        context_window: model.context_window,
+                        max_output_tokens: model.max_output_tokens,
+                        capabilities_json: model.capabilities_json,
+                        raw_metadata: model.raw_metadata,
+                    })
+                    .collect()
+            });
+        self.settle(id, result).await
+    }
+
     /// HealthProbe::probe (§6.5).
     pub async fn health_probe(
         &self,
@@ -1434,6 +1515,14 @@ impl PluginManager {
             .runtime
             .instantiate(&linker, &mut store, &component)
             .await?;
+        if !manifest.provides.account_model_sources.is_empty() {
+            let mut model_store = self.new_store(&row, &limits, &[], false, false);
+            let _ = self
+                .inner
+                .runtime
+                .instantiate_model_source(&linker, &mut model_store, &component)
+                .await?;
+        }
         Ok(manifest.provides.provided())
     }
 
@@ -1524,6 +1613,12 @@ struct AuthPrepared {
     wall_time: Duration,
 }
 
+struct ModelSourcePrepared {
+    store: wasmtime::Store<HostCtx>,
+    plugin: crate::plugins::runtime::model_source_bindings::PluginModelSource,
+    wall_time: Duration,
+}
+
 struct AdapterPrepared {
     store: wasmtime::Store<HostCtx>,
     plugin: crate::plugins::runtime::adapter_bindings::PluginAdapter,
@@ -1543,6 +1638,19 @@ fn map_call_error(e: wasmtime::Error) -> PluginFault {
 /// Map the guest's `Result<T, PluginError>` into a [`PluginFault`].
 fn map_plugin_result<T>(r: Result<T, wit::types::PluginError>) -> Result<T, PluginFault> {
     r.map_err(|e| PluginFault::PluginError {
+        code: e.code,
+        message: e.message,
+        retryable: e.retryable,
+    })
+}
+
+fn map_account_model_result<T>(
+    result: Result<
+        T,
+        crate::plugins::runtime::model_source_bindings::kinetix::plugin::types::PluginError,
+    >,
+) -> Result<T, PluginFault> {
+    result.map_err(|e| PluginFault::PluginError {
         code: e.code,
         message: e.message,
         retryable: e.retryable,
