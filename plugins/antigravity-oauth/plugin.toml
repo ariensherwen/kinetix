@@ -13,6 +13,13 @@ plugin_api = "1"
 credential_strategies = ["antigravity-oauth"]
 provider_adapters = ["antigravity"]
 
+[[integrations]]
+id = "antigravity"
+name = "Google Antigravity"
+description = "Connect a Google Antigravity account and use the v1internal model API."
+provider_adapter = "antigravity"
+credential_strategy = "antigravity-oauth"
+
 [permissions]
 # Only the token endpoint is ever contacted (control-plane, buffered HTTP).
 network_hosts = ["oauth2.googleapis.com"]
