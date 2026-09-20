@@ -18,7 +18,20 @@ stream/error responses. It imports no network capability at all.
 The manifest groups those two low-level capabilities into the
 `antigravity` integration descriptor. Dashboard clients can therefore present
 one user-facing **Google Antigravity** integration instead of exposing separate
-wire-adapter and credential-strategy names.
+wire-adapter and credential-strategy names. It also exports an `antigravity`
+AuthFlow so a local Kinetix dashboard can create an account through Google
+authorization without manually pasting refresh-token JSON.
+
+## Connect from the dashboard
+
+The bundled Google OAuth client is a desktop/native client and therefore uses a
+loopback callback. Set `KINETIX_PUBLIC_BASE_URL` to a loopback URL such as
+`http://127.0.0.1:8080`, bind the provider's credential strategy to
+`plugin:dev.kinetix.antigravity-oauth/antigravity-oauth`, then use **Connect**
+from Plugins & Integrations.
+
+Remote hosted callbacks require an operator-provided web OAuth client, which is
+reserved for the declarative plugin-settings layer.
 
 ## Credential format
 
@@ -48,7 +61,8 @@ the plugin is enabled and fails closed if the plugin is missing or disabled.
 
 ## Permissions
 
-- `network_hosts = ["oauth2.googleapis.com"]` — only the Google token endpoint.
+- `network_hosts = ["accounts.google.com", "oauth2.googleapis.com", "www.googleapis.com"]`
+  — browser authorization host validation, token exchange, and user-info lookup.
 - `credential_scopes = ["provider:antigravity"]`.
 - `credential_read = true` — **required** because the refresh-token exchange
   places the secret in a POST body, which the opaque-handle model cannot
