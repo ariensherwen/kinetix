@@ -38,6 +38,15 @@ pub mod auth {
     });
 }
 
+/// Bindings for the optional account-aware model discovery world.
+pub mod model_source {
+    wit_bindgen::generate!({
+        path: "wit",
+        world: "plugin-model-source",
+        pub_export_macro: true,
+    });
+}
+
 /// Bindings for the `plugin-adapter` world (§6.3). A component that provides a
 /// `provider-adapter` capability implements `adapter::exports::provider_adapter::Guest`
 /// and invokes `adapter::export!(Component with_types_in kinetix_plugin_sdk::adapter)`.
