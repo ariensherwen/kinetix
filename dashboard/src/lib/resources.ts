@@ -183,6 +183,35 @@ export interface PluginPackage {
   installed_at: string;
 }
 
+export interface PluginPermissionListDiff {
+  added: string[];
+  removed: string[];
+}
+
+export interface PluginPermissionBoolDiff {
+  from: boolean;
+  to: boolean;
+  changed: boolean;
+}
+
+export interface PluginPermissionDiff {
+  network_hosts: PluginPermissionListDiff;
+  credential_scopes: PluginPermissionListDiff;
+  credential_read: PluginPermissionBoolDiff;
+}
+
+export interface PluginRollbackPreview {
+  id: string;
+  current_version: string;
+  target_version: string;
+  package_sha256: string;
+  signature: string;
+  source: string;
+  permissions: PluginPermissions;
+  permission_diff: PluginPermissionDiff;
+  provides: PluginCapability[];
+}
+
 export interface PluginDetail extends PluginSummary {
   permissions_approved?: PluginPermissionGrant[];
   runtime?: Record<string, unknown> | null;
@@ -375,6 +404,10 @@ export const Kinetix = {
   validatePlugin: (id: string) =>
     api.post<{ ok: boolean; id: string; provides: PluginCapability[] }>(
       `/admin/api/plugins/${encodeURIComponent(id)}/validate`,
+    ),
+  previewPluginRollback: (id: string, sha256: string) =>
+    api.get<PluginRollbackPreview>(
+      `/admin/api/plugins/${encodeURIComponent(id)}/packages/${encodeURIComponent(sha256)}/preview`,
     ),
   rollbackPlugin: (id: string, sha256: string) =>
     api.post<PluginInstallResult>(
