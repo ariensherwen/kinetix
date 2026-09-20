@@ -963,6 +963,30 @@ pub async fn discover_models(
                     "provider is bound to unavailable plugin model source '{reference}'"
                 )));
             }
+            if let Some(credential_ref) = provider.credential_plugin_ref() {
+                if credential_ref.plugin_id == pref.plugin_id {
+                    let account = db::accounts_for_provider(&state.pool, &provider.id)
+                        .await
+                        .map_err(ApiError::internal)?
+                        .into_iter()
+                        .next()
+                        .ok_or_else(|| {
+                            ApiError::bad(
+                                "provider has no credentials available for plugin model discovery",
+                            )
+                        })?;
+                    state
+                        .credential_for(&provider, &account)
+                        .await
+                        .map_err(|e| {
+                            ApiError::bad(format!(
+                                "credential warm-up for plugin model discovery failed: {}",
+                                crate::crypto::redact(&e.to_string())
+                            ))
+                        })?;
+                }
+            }
+
             let models_path = provider.models_path.clone().unwrap_or_default();
             let list = manager
                 .model_discover(
@@ -4406,7 +4430,12 @@ pub async fn plugin_auth_callback(
         .await
         .map_err(ApiError::internal)?;
 
-    Ok(Redirect::to("/admin/plugins?plugin_auth=success"))
+    let location = url::form_urlencoded::Serializer::new(
+        String::from("/admin/plugins?plugin_auth=success&"),
+    )
+    .append_pair("provider_id", &provider.id)
+    .finish();
+    Ok(Redirect::to(&location))
 }
 
 /// `GET /admin/api/plugins/{id}/packages/{sha256}/preview` — inspect a retained rollback target.
