@@ -293,6 +293,91 @@ impl PluginManager {
         Ok(relative.to_string_lossy().into_owned())
     }
 
+    /// Reactivate an exact retained package as the active plugin version.
+    ///
+    /// Historical acceptance is not enough by itself: the retained bytes are
+    /// re-hashed, the manifest identity/version are checked against provenance,
+    /// and the component is recompiled. Activation goes through `upsert_plugin`,
+    /// which disables the plugin and clears all permission grants.
+    pub async fn rollback(&self, id: &str, sha256: &str) -> Result<RollbackOutcome> {
+        let current = self
+            .get(id)
+            .await?
+            .ok_or_else(|| anyhow!("plugin '{id}' is not installed"))?;
+        if current.package_sha256.eq_ignore_ascii_case(sha256) {
+            bail!("plugin '{id}' is already using package {sha256}");
+        }
+
+        let retained = store::get_package(&self.inner.pool, id, sha256)
+            .await?
+            .ok_or_else(|| anyhow!("retained package '{sha256}' not found for plugin '{id}'"))?;
+
+        let relative = Path::new(&retained.package_path);
+        if relative.is_absolute()
+            || relative.components().any(|component| {
+                !matches!(component, std::path::Component::Normal(_))
+            })
+        {
+            bail!("retained package path is invalid");
+        }
+
+        let path = self.inner.package_root.join(relative);
+        let bytes = tokio::fs::read(&path)
+            .await
+            .map_err(|e| anyhow!("reading retained package {}: {e}", path.display()))?;
+        let computed = package::sha256_hex(&bytes);
+        if !computed.eq_ignore_ascii_case(&retained.package_sha256)
+            || !computed.eq_ignore_ascii_case(sha256)
+        {
+            bail!(
+                "retained package hash mismatch: expected {}, computed {}",
+                retained.package_sha256,
+                computed
+            );
+        }
+
+        let pkg = package::read_package(&bytes)?;
+        let validated = package::validate_manifest(&pkg, self.inner.policy)?;
+        if validated.manifest.id != id {
+            bail!(
+                "retained package id mismatch: expected '{id}', package declares '{}'",
+                validated.manifest.id
+            );
+        }
+        if validated.manifest.version != retained.version {
+            bail!(
+                "retained package version mismatch: provenance says '{}', package declares '{}'",
+                retained.version,
+                validated.manifest.version
+            );
+        }
+
+        self.inner
+            .runtime
+            .compile(&pkg.component)
+            .map_err(|e| anyhow!("{e}"))?;
+
+        let source = format!("rollback:{}", retained.package_sha256);
+        store::upsert_plugin(
+            &self.inner.pool,
+            &validated,
+            &retained.package_sha256,
+            &pkg.component,
+            &retained.signature,
+            &retained.package_path,
+            &source,
+        )
+        .await?;
+
+        Ok(RollbackOutcome {
+            id: id.to_string(),
+            version: retained.version,
+            package_sha256: retained.package_sha256,
+            signature: retained.signature,
+            provides: validated.manifest.provides.provided(),
+        })
+    }
+
     /// Root of the immutable package cache.
     pub fn package_root(&self) -> &Path {
         &self.inner.package_root
@@ -1431,6 +1516,16 @@ pub struct PluginCounters {
     pub timeouts: u64,
     pub cancellations: u64,
     pub http_requests: u64,
+}
+
+/// The outcome of reactivating a retained package.
+#[derive(Debug, Clone)]
+pub struct RollbackOutcome {
+    pub id: String,
+    pub version: String,
+    pub package_sha256: String,
+    pub signature: String,
+    pub provides: Vec<Provided>,
 }
 
 /// The outcome of a successful install.
