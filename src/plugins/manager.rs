@@ -1825,11 +1825,10 @@ mod tests {
         }
 
         let waiting_manager = manager.clone();
-        let blocked = tokio::spawn(async move {
-            waiting_manager
-                .acquire_invocation_permits("plugin-a")
-                .await
-        });
+        let blocked =
+            tokio::spawn(
+                async move { waiting_manager.acquire_invocation_permits("plugin-a").await },
+            );
         tokio::time::sleep(Duration::from_millis(20)).await;
         assert!(
             !blocked.is_finished(),
