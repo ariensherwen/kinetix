@@ -388,6 +388,37 @@ The reactivated package is always **disabled** and all permission grants are
 cleared even when the diff is empty. An operator must review and approve the
 rolled-back manifest before it can be enabled again.
 
+## Integration model discovery
+
+A plugin integration may expose a `model_source`. Providers created from that
+integration bind `model_source_plugin` to the same plugin capability, and the
+Plugins page can run live discovery/import without leaving the integration view.
+
+Model-source discovery remains host-mediated. The plugin receives provider
+identity/config but not an account id. When a discovery implementation needs
+the provider's preferred account credential, it may request the reserved named
+credential:
+
+```text
+provider-default:<provider-id>
+```
+
+Kinetix resolves that name only for plaintext `host-credential.read`, after
+checking the plugin's approved credential scope. It selects the highest-priority
+non-disabled account for that provider. The same named credential is not usable
+for generic host signing or opaque leases.
+
+The Antigravity integration uses this path to call
+`/v1internal:fetchAvailableModels` through host-mediated HTTP. Its OAuth flow
+also initializes Cloud Code with `loadCodeAssist`, performs a best-effort
+onboarding call, and stores the resulting project id in the encrypted account
+credential. Refreshed access-token material is cached in encrypted plugin KV so
+subsequent requests do not repeatedly refresh from stale account JSON.
+
+Discovery observations may include context/output limits and provider-specific
+capability/raw metadata. Kinetix records these as observations and never
+overwrites explicit admin edits.
+
 ## Operating Plugins
 
 ### CLI Workflow
