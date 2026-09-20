@@ -738,7 +738,11 @@ async fn provider_plugin_binding_problems(state: &AppState, body: &ProviderBody)
             ));
             continue;
         }
-        if manager.resolve_binding(reference, capability).await.is_none() {
+        if manager
+            .resolve_binding(reference, capability)
+            .await
+            .is_none()
+        {
             problems.push(format!(
                 "{field} reference '{reference}' does not resolve to an installed, enabled, approved plugin providing {}",
                 capability.manifest_key()
@@ -749,9 +753,8 @@ async fn provider_plugin_binding_problems(state: &AppState, body: &ProviderBody)
     let model_reference = body.model_source_plugin.trim();
     if !model_reference.is_empty() {
         if crate::plugins::PluginRef::parse(model_reference).is_none() {
-            problems.push(
-                "model_source_plugin must use plugin:<id>/<capability-name> syntax".into(),
-            );
+            problems
+                .push("model_source_plugin must use plugin:<id>/<capability-name> syntax".into());
         } else {
             let v2 = manager
                 .resolve_binding(model_reference, Capability::ModelSourceV2)
