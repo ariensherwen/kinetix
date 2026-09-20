@@ -360,6 +360,22 @@ packages.
 Do not set an entry `installable = true` until the signed release asset exists
 and its exact SHA-256 and redirect hosts have been committed to the catalog.
 
+### Catalog update review
+
+For an already-installed catalog plugin, the dashboard does not install a newer
+package immediately. It first calls
+`POST /admin/api/plugins/catalog/{id}/preview`.
+
+Preview performs the same remote trust chain as installation—HTTPS/redirect
+allow-list, bounded download, exact SHA-256, manifest id/version, and publisher
+signature—but does not mutate plugin state. Kinetix then compares the target
+manifest to the active manifest and returns semantic changes to
+`network_hosts`, `credential_scopes`, and `credential_read`.
+
+Only after explicit confirmation does the normal catalog install path activate
+the new package. The update is still installed **disabled** and all permission
+approvals are cleared, even when the authority diff is empty.
+
 ## Version history and rollback
 
 Kinetix retains accepted package bytes independently from the active plugin row.
