@@ -710,11 +710,6 @@ async fn provider_plugin_binding_problems(state: &AppState, body: &ProviderBody)
             body.credential_plugin.as_str(),
             Capability::CredentialStrategy,
         ),
-        (
-            "model_source_plugin",
-            body.model_source_plugin.as_str(),
-            Capability::ModelSource,
-        ),
     ];
 
     let mut problems = Vec::new();
@@ -746,9 +741,36 @@ async fn provider_plugin_binding_problems(state: &AppState, body: &ProviderBody)
             ));
         }
     }
+
+    let model_reference = body.model_source_plugin.trim();
+    if !model_reference.is_empty() {
+        if crate::plugins::PluginRef::parse(model_reference).is_none() {
+            problems.push(
+                "model_source_plugin must use plugin:<id>/<capability-name> syntax".into(),
+            );
+        } else if let Some(manager) = state.plugin_manager() {
+            let account_aware = manager
+                .resolve_binding(model_reference, Capability::AccountModelSource)
+                .await
+                .is_some();
+            let legacy = manager
+                .resolve_binding(model_reference, Capability::ModelSource)
+                .await
+                .is_some();
+            if !account_aware && !legacy {
+                problems.push(format!(
+                    "model_source_plugin reference '{model_reference}' does not resolve to an installed, enabled, approved plugin providing account_model_sources or model_sources"
+                ));
+            }
+        } else {
+            problems.push(format!(
+                "model_source_plugin references '{model_reference}' but the plugin host is unavailable"
+            ));
+        }
+    }
+
     problems
 }
-
 pub async fn create_provider(
     State(state): State<AppState>,
     _auth: AdminAuth,
@@ -4061,10 +4083,6 @@ pub async fn setup_plugin_integration_provider(
             &credential_plugin,
             crate::plugins::Capability::CredentialStrategy,
         ),
-        (
-            &model_source_plugin,
-            crate::plugins::Capability::ModelSource,
-        ),
     ] {
         if !reference.is_empty()
             && manager
@@ -4076,6 +4094,26 @@ pub async fn setup_plugin_integration_provider(
                 "integration capability binding '{reference}' is not enabled and approved"
             )));
         }
+    }
+    if !model_source_plugin.is_empty()
+        && manager
+            .resolve_binding(
+                &model_source_plugin,
+                crate::plugins::Capability::AccountModelSource,
+            )
+            .await
+            .is_none()
+        && manager
+            .resolve_binding(
+                &model_source_plugin,
+                crate::plugins::Capability::ModelSource,
+            )
+            .await
+            .is_none()
+    {
+        return Err(ApiError::bad(format!(
+            "integration model source binding '{model_source_plugin}' is not enabled and approved"
+        )));
     }
 
     let wire = WireFormat::parse(&template.wire_format)
