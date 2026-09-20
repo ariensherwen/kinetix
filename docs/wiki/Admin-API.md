@@ -134,6 +134,7 @@ Manage WebAssembly Component plugins (`.kxp` packages).
 | `POST /admin/api/plugins/{id}/enable` | Enable an installed plugin. Verifies component linking and registers capabilities. |
 | `POST /admin/api/plugins/{id}/disable` | Disable a plugin. Bound providers/routes fail closed immediately. |
 | `POST /admin/api/plugins/{id}/validate` | Re-instantiate the component in a test store to verify exports and linking. |
+| `POST /admin/api/plugins/{id}/rollback` | Reactivate a retained package by SHA-256 after path/hash/manifest/compile checks. The plugin is left disabled and all permission grants are cleared. |
 | `GET /admin/api/plugins/{id}/settings` | Read declarative host-owned plugin settings. Secret values are never returned; only `configured` is exposed. |
 | `PUT /admin/api/plugins/{id}/settings` | Partially update manifest-declared plugin settings. Values are type-checked and encrypted; audit logs record keys/counts, never values. |
 | `GET /admin/api/plugins/{id}/permissions` | View requested permissions from manifest vs currently approved grants. |
