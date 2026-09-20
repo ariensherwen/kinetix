@@ -236,9 +236,7 @@ fn validate_integration_id(id: &str) -> Result<()> {
         .chars()
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_');
     if !ok {
-        bail!(
-            "integration id '{id}' may only contain lowercase letters, digits, '-', '_'"
-        );
+        bail!("integration id '{id}' may only contain lowercase letters, digits, '-', '_'");
     }
     Ok(())
 }
@@ -356,7 +354,8 @@ storage = "2MiB"
         );
         let err = parse_and_validate(&bad, HostPolicy::default()).unwrap_err();
         assert!(
-            err.to_string().contains("unknown model_source 'missing-models'"),
+            err.to_string()
+                .contains("unknown model_source 'missing-models'"),
             "{err}"
         );
     }
@@ -380,7 +379,10 @@ storage = "2MiB"
                 "model_sources = [\"foo-models\"]",
                 "model_sources = [\"foo-models\"]\nauth_flows = [\"foo-login\"]",
             )
-            .replace("model_source = \"foo-models\"", "auth_flow = \"missing-login\"");
+            .replace(
+                "model_source = \"foo-models\"",
+                "auth_flow = \"missing-login\"",
+            );
         let err = parse_and_validate(&bad, HostPolicy::default()).unwrap_err();
         assert!(
             err.to_string()
