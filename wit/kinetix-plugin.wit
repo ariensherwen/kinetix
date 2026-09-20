@@ -209,6 +209,30 @@ world plugin {
   }
 }
 
+/// Credential-aware model discovery. Kept in a separate optional world so
+/// existing API-v1 components that implement the original model-source export
+/// remain valid. Core selects an account and passes its opaque reference; the
+/// guest may use host-credential/host-http without receiving unrelated secrets.
+interface model-source-v2 {
+  use types.{plugin-error, discovered-model};
+  discover: func(
+    provider-id: string,
+    account-id: string,
+    base-url: string,
+    models-path: string
+  ) -> result<list<discovered-model>, plugin-error>;
+}
+
+world plugin-model-source-v2 {
+  import host-http;
+  import host-storage;
+  import host-log;
+  import host-credential;
+  import host-clock;
+
+  export model-source-v2;
+}
+
 /// Account authorization world. Kept separate from `plugin` so existing API
 /// v1 components do not gain a mandatory export. Core owns CSRF state and PKCE
 /// material; the plugin owns provider-specific URLs/exchange behavior.
