@@ -23,7 +23,7 @@ use super::runtime::{
     bindings, wit, DeadlineGuard, HostBacking, HostCtx, PluginFault, PluginRuntime, CONFIG_PREFIX,
 };
 use super::store::{self, PermissionGrant, PluginRow};
-use super::types::{Capability, Limits, Manifest, Permissions, Provided};
+use super::types::{Capability, Manifest, Permissions, Provided};
 
 /// Bounds total concurrent guest invocations across the process (§14).
 const MAX_CONCURRENT_INVOCATIONS: usize = 16;
@@ -41,6 +41,7 @@ struct PluginMetricCell {
     faults: std::sync::atomic::AtomicU64,
     timeouts: std::sync::atomic::AtomicU64,
     cancellations: std::sync::atomic::AtomicU64,
+    http_requests: std::sync::atomic::AtomicU64,
     duration_micros: std::sync::atomic::AtomicU64,
 }
 
@@ -163,7 +164,6 @@ struct Inner {
     faults: std::sync::atomic::AtomicU64,
     timeouts: std::sync::atomic::AtomicU64,
     cancellations: std::sync::atomic::AtomicU64,
-    http_requests: std::sync::atomic::AtomicU64,
 }
 
 impl PluginManager {
@@ -917,19 +917,6 @@ impl PluginManager {
         buffered_http_allowed: bool,
         capability: &str,
     ) -> wasmtime::Store<HostCtx> {
-        let manifest = row.manifest().unwrap_or_else(|| Manifest {
-            manifest_version: 1,
-            id: row.id.clone(),
-            name: row.id.clone(),
-            version: row.version.clone(),
-            plugin_api: "1".into(),
-            provides: Default::default(),
-            integrations: Default::default(),
-            ui: Default::default(),
-            permissions: Default::default(),
-            limits: Limits::default(),
-            routing_facts_mode: "pure".into(),
-        });
         // Runtime authority is derived only from approved grant rows.
         let mut network_hosts = Vec::new();
         let mut credential_scopes = Vec::new();
