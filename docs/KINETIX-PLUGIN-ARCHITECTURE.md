@@ -791,6 +791,21 @@ Routing facts are invoked inline on the request path but must stay within their 
 §6.4 the `pure` model does no network work, and the `cached` model reads a precomputed snapshot.
 Health probes (10 s) and model discovery (30 s) run off the request path.
 
+### 14.0.1 Plugin KV storage quota
+
+The manifest `limits.storage` bound is enforced against the sum of decrypted
+plugin-KV **value bytes**, not ciphertext size. Quota-aware writes acquire a
+SQLite immediate write lock before measuring current usage, so concurrent guest
+invocations cannot both pass a stale read and overcommit the budget.
+
+Replacing a key excludes the old plaintext value length before adding the new
+value. Guest `host-storage.put`, routing-fact cache writes, and host-owned
+`_config:` settings all consume the same storage budget. Deletes release
+capacity.
+
+This keeps the configured quota stable regardless of encryption/base64
+overhead and closes cache/config bypasses.
+
 ## 14.1 Catalog distribution and publisher trust
 
 The official catalog is a discovery index, not a signing authority. Package
