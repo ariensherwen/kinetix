@@ -103,11 +103,7 @@ impl HostBacking for Backing {
         self.crypto.decrypt(&account.secret_enc)
     }
 
-    async fn resolve_default_secret(
-        &self,
-        _plugin_id: &str,
-        provider_id: &str,
-    ) -> Result<String> {
+    async fn resolve_default_secret(&self, _plugin_id: &str, provider_id: &str) -> Result<String> {
         let account = crate::db::accounts_for_provider(&self.pool, provider_id)
             .await?
             .into_iter()
