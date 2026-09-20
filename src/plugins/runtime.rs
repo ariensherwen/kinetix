@@ -337,12 +337,10 @@ impl bindings::kinetix::plugin::host_http::Host for HostCtx {
         &mut self,
         req: wit::types::HttpRequest,
     ) -> anyhow::Result<Result<wit::types::HttpResponse, wit::types::PluginError>> {
-        // The buffered host-http is control-plane only: the adapter transport
-        // is a separate streaming capability (§7.1). A `pure` routing-fact
-        // plugin is also refused outbound HTTP so Routes stay deterministic
-        // Buffered HTTP is capability-scoped by the manager. Routing-fact
-        // request-path calls and adapter-world calls are denied here even if
-        // the plugin has approved network hosts.
+        // The buffered host-http is control-plane only: adapter transport is a
+        // separate capability (§7.1). Authority is scoped per invocation by the
+        // manager, so request-path routing facts and adapter-world calls are
+        // denied even when the plugin has approved network hosts.
         if !self.buffered_http_allowed {
             return Ok(Err(err(
                 "permission_denied",
@@ -721,6 +719,50 @@ mod tests {
             result.is_err(),
             "an empty component must not satisfy the world"
         );
+    }
+
+    fn test_ctx(buffered_http_allowed: bool, network_hosts: Vec<String>) -> HostCtx {
+        HostCtx {
+            plugin_id: "test".into(),
+            network_hosts,
+            credential_read: false,
+            credential_sign: false,
+            credential_scopes: vec![],
+            storage_quota: 1024,
+            max_outbound_requests: 1,
+            max_http_body: 1024,
+            adapter_stream: false,
+            buffered_http_allowed,
+            outbound_count: 0,
+            http: reqwest::Client::new(),
+            backing: std::sync::Arc::new(NoBacking),
+            limits: wasmtime::StoreLimitsBuilder::new().build(),
+        }
+    }
+
+    #[tokio::test]
+    async fn buffered_http_is_scoped_to_the_current_capability() {
+        use bindings::kinetix::plugin::host_http::Host;
+
+        let req = wit::types::HttpRequest {
+            method: "GET".into(),
+            url: "https://oauth2.googleapis.com/token".into(),
+            headers: vec![],
+            body: vec![],
+            credential: None,
+        };
+
+        let mut denied = test_ctx(false, vec!["oauth2.googleapis.com".into()]);
+        let err = denied.send(req.clone()).await.unwrap().unwrap_err();
+        assert_eq!(err.code, "permission_denied");
+        assert!(err.message.contains("not available to this plugin capability"));
+
+        // With capability-level HTTP enabled, the request advances to the
+        // manifest host allow-list instead of being rejected by routing policy.
+        let mut allowed_capability = test_ctx(true, vec!["api.example.com".into()]);
+        let err = allowed_capability.send(req).await.unwrap().unwrap_err();
+        assert_eq!(err.code, "permission_denied");
+        assert!(err.message.contains("network_hosts"));
     }
 
     struct NoBacking;
