@@ -43,11 +43,9 @@ async fn manager() -> (PluginManager, Pool) {
     let pool = db::connect(&url).await.unwrap();
     db::migrate(&pool).await.unwrap();
     let crypto = Arc::new(Crypto::new(&[9u8; 32]));
-    let http = reqwest::Client::new();
     let manager = PluginManager::new(
         pool.clone(),
         crypto,
-        http,
         HostPolicy::default(),
         dir.join("plugin-packages"),
     )
