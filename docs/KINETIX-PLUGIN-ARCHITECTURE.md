@@ -293,6 +293,20 @@ ever receiving plaintext secret bytes.
 
 ### 6.2 ModelSource
 
+Two discovery contracts coexist under plugin API v1:
+
+- `model_sources` use the original `plugin` world and receive provider/base/path
+  metadata only. This is appropriate for public or otherwise unauthenticated
+  model catalogs.
+- `account_model_sources` use the optional `plugin-model-source` world and
+  receive an explicit host-owned `AccountRef`. This is used when discovery
+  requires the provider account's scoped credential.
+
+The second world is additive: existing components do not gain a mandatory
+export. The host resolves the account-aware capability first when a provider's
+`model_source_plugin` binding names one, otherwise it uses the legacy export.
+Credential use is still mediated by the same approved provider/binding scopes.
+
 Returns discovery **observations**:
 
 ```text
