@@ -116,8 +116,7 @@ impl AppState {
         let credentials = Arc::new(StaticKeyStrategy::new(crypto.clone()));
         let sessions = Arc::new(crate::auth::Sessions::new(config.session_ttl_minutes));
         let plugin_auth_sessions = Arc::new(crate::auth::PluginAuthSessions::new());
-        let (hook_tx, hook_rx) =
-            tokio::sync::mpsc::channel::<HookJob>(HOOK_QUEUE_CAPACITY);
+        let (hook_tx, hook_rx) = tokio::sync::mpsc::channel::<HookJob>(HOOK_QUEUE_CAPACITY);
         spawn_hook_worker(hook_rx);
         AppState {
             config,
