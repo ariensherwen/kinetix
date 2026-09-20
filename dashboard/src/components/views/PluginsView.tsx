@@ -14,7 +14,13 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react';
-import { Kinetix, PluginDetail, PluginPermissionResponse, PluginSummary } from '../../lib/resources';
+import {
+  Kinetix,
+  PluginDetail,
+  PluginPermissionResponse,
+  PluginSettingState,
+  PluginSummary,
+} from '../../lib/resources';
 import { Provider } from '../../types';
 import { SketchBadge, SketchButton, WobblyCard } from '../HandDrawnElements';
 
@@ -71,6 +77,8 @@ export const PluginsView: React.FC = () => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<PluginDetail | null>(null);
   const [permissions, setPermissions] = useState<PluginPermissionResponse | null>(null);
+  const [settings, setSettings] = useState<PluginSettingState[]>([]);
+  const [settingDrafts, setSettingDrafts] = useState<Record<string, string | boolean>>({});
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -82,12 +90,26 @@ export const PluginsView: React.FC = () => {
   const [allowUntrusted, setAllowUntrusted] = useState(false);
 
   const loadDetail = useCallback(async (id: string) => {
-    const [plugin, grants] = await Promise.all([
+    const [plugin, grants, settingState] = await Promise.all([
       Kinetix.plugin(id),
       Kinetix.pluginPermissions(id),
+      Kinetix.pluginSettings(id),
     ]);
     setDetail(plugin);
     setPermissions(grants);
+    setSettings(settingState.settings);
+
+    const drafts: Record<string, string | boolean> = {};
+    for (const setting of settingState.settings) {
+      if (setting.kind === 'boolean') {
+        drafts[setting.key] = setting.value === true;
+      } else if (setting.kind === 'secret') {
+        drafts[setting.key] = '';
+      } else {
+        drafts[setting.key] = typeof setting.value === 'string' ? setting.value : '';
+      }
+    }
+    setSettingDrafts(drafts);
   }, []);
 
   const refresh = useCallback(async (preferredId?: string | null) => {
@@ -110,6 +132,8 @@ export const PluginsView: React.FC = () => {
         setSelectedId(null);
         setDetail(null);
         setPermissions(null);
+        setSettings([]);
+        setSettingDrafts({});
       }
       setError(null);
     } catch (err) {
@@ -188,8 +212,65 @@ export const PluginsView: React.FC = () => {
       setSelectedId(null);
       setDetail(null);
       setPermissions(null);
+      setSettings([]);
+      setSettingDrafts({});
       setNotice('Plugin removed.');
       await refresh(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const saveSettings = async () => {
+    if (!selectedId) return;
+    setBusy('settings');
+    setError(null);
+    setNotice(null);
+
+    const values: Record<string, unknown> = {};
+    for (const setting of settings) {
+      const draft = settingDrafts[setting.key];
+      if (setting.kind === 'secret') {
+        if (typeof draft === 'string' && draft.length > 0) {
+          values[setting.key] = draft;
+        }
+        continue;
+      }
+      values[setting.key] = draft ?? (setting.kind === 'boolean' ? false : '');
+    }
+
+    try {
+      const response = await Kinetix.updatePluginSettings(selectedId, values);
+      setSettings(response.settings);
+      setSettingDrafts((current) => {
+        const next = { ...current };
+        for (const setting of response.settings) {
+          if (setting.kind === 'secret') {
+            next[setting.key] = '';
+          }
+        }
+        return next;
+      });
+      setNotice('Plugin settings saved.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const clearSetting = async (key: string) => {
+    if (!selectedId) return;
+    setBusy(`setting:${key}`);
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await Kinetix.updatePluginSettings(selectedId, { [key]: null });
+      setSettings(response.settings);
+      setSettingDrafts((current) => ({ ...current, [key]: '' }));
+      setNotice(`Cleared plugin setting “${key}”.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -588,6 +669,110 @@ export const PluginsView: React.FC = () => {
                               </div>
                             );
                           })}
+                      </div>
+                    ))}
+                  </div>
+                </WobblyCard>
+              )}
+
+              {settings.length > 0 && (
+                <WobblyCard className="p-5">
+                  <div className="flex flex-col md:flex-row md:items-start gap-4">
+                    <div className="flex-1">
+                      <h4 className="text-lg font-heading font-bold">Settings</h4>
+                      <p className="text-sm font-body text-[var(--ink)]/70">
+                        These values are stored encrypted by Kinetix. Secret values are write-only in the dashboard.
+                      </p>
+                    </div>
+                    <SketchButton
+                      variant="primary"
+                      disabled={busy !== null}
+                      onClick={() => void saveSettings()}
+                    >
+                      {busy === 'settings' ? 'Saving…' : 'Save settings'}
+                    </SketchButton>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    {settings.map((setting) => (
+                      <div key={setting.key} className="space-y-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <label className="text-sm font-heading font-bold" htmlFor={`plugin-setting-${setting.key}`}>
+                            {setting.label}
+                            {setting.required && <span className="text-[var(--marker-red)]"> *</span>}
+                          </label>
+                          {setting.configured && !setting.required && (
+                            <button
+                              type="button"
+                              className="text-xs font-mono underline text-[var(--ink)]/60 hover:text-[var(--ink)]"
+                              disabled={busy !== null}
+                              onClick={() => void clearSetting(setting.key)}
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </div>
+
+                        {setting.kind === 'boolean' ? (
+                          <label className="flex items-center gap-2 min-h-10">
+                            <input
+                              id={`plugin-setting-${setting.key}`}
+                              type="checkbox"
+                              checked={settingDrafts[setting.key] === true}
+                              onChange={(e) =>
+                                setSettingDrafts((current) => ({
+                                  ...current,
+                                  [setting.key]: e.target.checked,
+                                }))
+                              }
+                            />
+                            <span className="text-sm font-body">
+                              {settingDrafts[setting.key] === true ? 'Enabled' : 'Disabled'}
+                            </span>
+                          </label>
+                        ) : setting.kind === 'select' ? (
+                          <select
+                            id={`plugin-setting-${setting.key}`}
+                            value={String(settingDrafts[setting.key] ?? '')}
+                            onChange={(e) =>
+                              setSettingDrafts((current) => ({
+                                ...current,
+                                [setting.key]: e.target.value,
+                              }))
+                            }
+                            className="w-full px-3 py-2 bg-[var(--surface)] border-2 border-[var(--ink)] font-mono text-sm"
+                          >
+                            {!setting.required && <option value="">—</option>}
+                            {setting.options.map((option) => (
+                              <option key={option} value={option}>{option}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            id={`plugin-setting-${setting.key}`}
+                            type={setting.kind === 'secret' ? 'password' : 'text'}
+                            value={String(settingDrafts[setting.key] ?? '')}
+                            placeholder={
+                              setting.kind === 'secret' && setting.configured
+                                ? 'Configured — enter a new value to replace'
+                                : undefined
+                            }
+                            onChange={(e) =>
+                              setSettingDrafts((current) => ({
+                                ...current,
+                                [setting.key]: e.target.value,
+                              }))
+                            }
+                            className="w-full px-3 py-2 bg-[var(--surface)] border-2 border-[var(--ink)] font-mono text-sm"
+                          />
+                        )}
+
+                        {setting.description && (
+                          <p className="text-xs font-body text-[var(--ink)]/60">{setting.description}</p>
+                        )}
+                        {setting.kind === 'secret' && setting.configured && (
+                          <div className="text-xs font-mono text-[var(--success-text)]">Configured</div>
+                        )}
                       </div>
                     ))}
                   </div>
