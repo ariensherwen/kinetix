@@ -1141,6 +1141,13 @@ export const PluginsView: React.FC = () => {
                     <dt className="text-[var(--ink)]/65">HTTP requests</dt><dd className="font-mono">{selected.limits.max_outbound_requests}</dd>
                     <dt className="text-[var(--ink)]/65">HTTP body</dt><dd className="font-mono">{selected.limits.max_http_body}</dd>
                     <dt className="text-[var(--ink)]/65">Storage</dt><dd className="font-mono">{selected.limits.storage}</dd>
+                    <dt className="text-[var(--ink)]/65">Routing facts</dt><dd className="font-mono">{selected.routing_facts_mode}</dd>
+                    {selected.routing_facts_mode === 'cached' && (
+                      <>
+                        <dt className="text-[var(--ink)]/65">Fact refresh</dt>
+                        <dd className="font-mono">{selected.routing_facts_refresh_ms} ms</dd>
+                      </>
+                    )}
                   </dl>
                 </WobblyCard>
               </div>
