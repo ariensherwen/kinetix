@@ -376,3 +376,54 @@ fn validate_cf_access(state: &AppState, token: &str, aud: &str) -> Result<(), St
         .map(|_| ())
         .map_err(|e| format!("Access token rejected: {e}"))
 }
+
+
+#[cfg(test)]
+mod plugin_auth_tests {
+    use super::*;
+
+    #[test]
+    fn plugin_auth_state_is_random_and_one_time() {
+        let sessions = PluginAuthSessions::new();
+        let first = sessions.create(
+            "dev.example.plugin",
+            "login",
+            "prov_1",
+            "https://example.test/admin/api/plugins/auth/callback",
+        );
+        let second = sessions.create(
+            "dev.example.plugin",
+            "login",
+            "prov_1",
+            "https://example.test/admin/api/plugins/auth/callback",
+        );
+
+        assert_ne!(first.state, second.state);
+        assert_ne!(first.pkce_challenge, second.pkce_challenge);
+
+        let session = sessions.take(&first.state).expect("state should be live");
+        assert_eq!(session.plugin_id, "dev.example.plugin");
+        assert_eq!(session.flow_name, "login");
+        assert_eq!(session.provider_id, "prov_1");
+        assert!(!session.pkce_verifier.is_empty());
+
+        assert!(
+            sessions.take(&first.state).is_none(),
+            "state must be consumed exactly once"
+        );
+        assert!(sessions.take(&second.state).is_some());
+    }
+
+    #[test]
+    fn revoked_plugin_auth_state_cannot_be_consumed() {
+        let sessions = PluginAuthSessions::new();
+        let pending = sessions.create(
+            "dev.example.plugin",
+            "login",
+            "prov_1",
+            "https://example.test/callback",
+        );
+        sessions.revoke(&pending.state);
+        assert!(sessions.take(&pending.state).is_none());
+    }
+}
