@@ -573,7 +573,9 @@ impl PluginManager {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .remove(id);
-        self.inner.metrics.retain(|(plugin_id, _), _| plugin_id != id);
+        self.inner
+            .metrics
+            .retain(|(plugin_id, _), _| plugin_id != id);
         Ok(())
     }
 
@@ -991,7 +993,14 @@ impl PluginManager {
         let limits = manifest::effective_limits(&manifest, self.inner.policy)?;
         let component = self.inner.runtime.compile(&row.component)?;
         let linker = self.inner.runtime.linker()?;
-        let mut store = self.new_store(&row, &limits, &grants, false, buffered_http_allowed, capability);
+        let mut store = self.new_store(
+            &row,
+            &limits,
+            &grants,
+            false,
+            buffered_http_allowed,
+            capability,
+        );
         let plugin = self
             .inner
             .runtime
@@ -1170,7 +1179,8 @@ impl PluginManager {
             .call_wire_format(&mut p.store)
             .await
             .map_err(map_call_error);
-        self.settle_cancellable(id, "provider_adapter", started, &guard, res).await
+        self.settle_cancellable(id, "provider_adapter", started, &guard, res)
+            .await
     }
 
     pub async fn adapter_build_url(
@@ -1194,7 +1204,8 @@ impl PluginManager {
             .await
             .map_err(map_call_error)
             .and_then(map_adapter_result);
-        self.settle_cancellable(id, "provider_adapter", started, &guard, res).await
+        self.settle_cancellable(id, "provider_adapter", started, &guard, res)
+            .await
     }
 
     pub async fn adapter_apply_auth(
@@ -1218,7 +1229,8 @@ impl PluginManager {
             .await
             .map_err(map_call_error)
             .and_then(map_adapter_result);
-        self.settle_cancellable(id, "provider_adapter", started, &guard, res).await
+        self.settle_cancellable(id, "provider_adapter", started, &guard, res)
+            .await
     }
 
     pub async fn adapter_build_body(
@@ -1243,7 +1255,8 @@ impl PluginManager {
             .await
             .map_err(map_call_error)
             .and_then(map_adapter_result);
-        self.settle_cancellable(id, "provider_adapter", started, &guard, res).await
+        self.settle_cancellable(id, "provider_adapter", started, &guard, res)
+            .await
     }
 
     pub async fn adapter_classify_error(
@@ -1268,7 +1281,8 @@ impl PluginManager {
             .await
             .map_err(map_call_error)
             .and_then(map_adapter_result);
-        self.settle_cancellable(id, "provider_adapter", started, &guard, res).await
+        self.settle_cancellable(id, "provider_adapter", started, &guard, res)
+            .await
     }
 
     pub async fn adapter_parse_stream_chunk(
@@ -1291,7 +1305,8 @@ impl PluginManager {
             .await
             .map_err(map_call_error)
             .and_then(map_adapter_result);
-        self.settle_cancellable(id, "provider_adapter", started, &guard, res).await
+        self.settle_cancellable(id, "provider_adapter", started, &guard, res)
+            .await
     }
 
     pub async fn adapter_parse_full_response(
@@ -1314,7 +1329,8 @@ impl PluginManager {
             .await
             .map_err(map_call_error)
             .and_then(map_adapter_result);
-        self.settle_cancellable(id, "provider_adapter", started, &guard, res).await
+        self.settle_cancellable(id, "provider_adapter", started, &guard, res)
+            .await
     }
 
     fn observe_duration(
@@ -1487,7 +1503,8 @@ impl PluginManager {
             .map_err(map_call_error)
             .and_then(map_plugin_result);
         watchdog.abort();
-        self.settle_cancellable(id, "routing_facts", started, &guard, res).await
+        self.settle_cancellable(id, "routing_facts", started, &guard, res)
+            .await
     }
 
     /// RoutingFacts::facts (§6.4). `request_json` must carry only request/config
@@ -1536,7 +1553,8 @@ impl PluginManager {
             .await
             .map_err(map_call_error)
             .and_then(map_plugin_result);
-        self.settle(id, "hook.on_request_normalized", started, res).await
+        self.settle(id, "hook.on_request_normalized", started, res)
+            .await
     }
 
     /// Read-only hook: on_target_candidate (§6.6).
@@ -1560,7 +1578,8 @@ impl PluginManager {
             .await
             .map_err(map_call_error)
             .and_then(map_plugin_result);
-        self.settle(id, "hook.on_target_candidate", started, res).await
+        self.settle(id, "hook.on_target_candidate", started, res)
+            .await
     }
 
     /// Fire-and-forget hook: on_usage_finalized (§6.6). Runs off the request
@@ -1585,7 +1604,8 @@ impl PluginManager {
             .await
             .map_err(map_call_error)
             .and_then(map_plugin_result);
-        self.settle(id, "hook.on_usage_finalized", started, res).await
+        self.settle(id, "hook.on_usage_finalized", started, res)
+            .await
     }
 
     /// Validate an installed plugin by instantiating it (§11 self-check).
@@ -1994,16 +2014,13 @@ mod tests {
         let (manager, pool, dir) = concurrency_test_manager().await;
 
         let a = metric_cell(&manager.inner.metrics, "plugin-a", "model_source");
-        a.invocations
-            .store(3, std::sync::atomic::Ordering::Relaxed);
-        a.successes
-            .store(2, std::sync::atomic::Ordering::Relaxed);
+        a.invocations.store(3, std::sync::atomic::Ordering::Relaxed);
+        a.successes.store(2, std::sync::atomic::Ordering::Relaxed);
         a.http_requests
             .store(5, std::sync::atomic::Ordering::Relaxed);
 
         let b = metric_cell(&manager.inner.metrics, "plugin-b", "health_probe");
-        b.invocations
-            .store(7, std::sync::atomic::Ordering::Relaxed);
+        b.invocations.store(7, std::sync::atomic::Ordering::Relaxed);
 
         let a_snapshot = manager.metrics_for_plugin("plugin-a");
         assert_eq!(a_snapshot.totals.invocations, 3);
