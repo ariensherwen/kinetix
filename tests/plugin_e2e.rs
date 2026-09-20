@@ -84,6 +84,27 @@ async fn installs_enables_and_instantiates_a_real_component() {
         )
         .await;
     assert_eq!(resolved.as_deref(), Some("dev.kinetix.antigravity-oauth"));
+
+    assert!(
+        outcome
+            .provides
+            .iter()
+            .any(|p| p.capability == Capability::AuthFlow),
+        "plugin should provide an account auth flow"
+    );
+    let authorize_url = m
+        .auth_begin(
+            "dev.kinetix.antigravity-oauth",
+            "antigravity",
+            "https://kinetix.example/admin/api/plugins/auth/callback",
+            "state-123",
+            Some("challenge-123"),
+        )
+        .await
+        .expect("plugin-auth world should bind and build an authorization URL");
+    assert!(authorize_url.starts_with("https://accounts.google.com/"));
+    assert!(authorize_url.contains("state=state-123"));
+    assert!(authorize_url.contains("code_challenge=challenge-123"));
 }
 
 #[tokio::test]
