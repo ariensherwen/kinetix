@@ -442,9 +442,7 @@ pub fn validate(manifest: Manifest, policy: HostPolicy) -> Result<ValidatedManif
         && manifest.routing_facts_mode == "cached"
         && !(5_000..=3_600_000).contains(&manifest.routing_facts_refresh_ms)
     {
-        bail!(
-            "routing_facts_refresh_ms must be 5000..=3600000 for cached routing facts"
-        );
+        bail!("routing_facts_refresh_ms must be 5000..=3600000 for cached routing facts");
     }
 
     // §7.1: an adapter plugin is a pure translation library and must not hold
