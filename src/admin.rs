@@ -3690,14 +3690,19 @@ async fn download_catalog_package(
     Err(ApiError::bad("catalog artifact download failed"))
 }
 
-/// `POST /admin/api/plugins/catalog/{id}/install` — install a trusted catalog package.
-pub async fn install_catalog_plugin(
-    State(state): State<AppState>,
-    _auth: AdminAuth,
-    Path(id): Path<String>,
-) -> ApiResult {
-    let manager = plugin_manager(&state)?;
-    let plugin = crate::plugins::catalog::find_plugin(&id).map_err(plugin_bad)?;
+struct VerifiedCatalogPackage {
+    plugin: crate::plugins::catalog::CatalogPlugin,
+    bytes: Vec<u8>,
+    key: [u8; 32],
+    validated: crate::plugins::ValidatedManifest,
+}
+
+async fn verify_catalog_package(
+    state: &AppState,
+    manager: &crate::plugins::PluginManager,
+    id: &str,
+) -> Result<VerifiedCatalogPackage, ApiError> {
+    let plugin = crate::plugins::catalog::find_plugin(id).map_err(plugin_bad)?;
     let distribution = plugin
         .distribution
         .as_ref()
@@ -3712,7 +3717,7 @@ pub async fn install_catalog_plugin(
         .map_err(plugin_bad)?
         .ok_or_else(|| ApiError::bad("catalog publisher key is not trusted"))?;
 
-    let bytes = download_catalog_package(&state, distribution).await?;
+    let bytes = download_catalog_package(state, distribution).await?;
     let pkg = crate::plugins::package::read_package(&bytes).map_err(plugin_bad)?;
     if !distribution
         .sha256
@@ -3744,9 +3749,88 @@ pub async fn install_catalog_plugin(
         ));
     }
 
-    let source = format!("catalog:{}@{}", plugin.id, plugin.latest_version);
+    Ok(VerifiedCatalogPackage {
+        plugin,
+        bytes,
+        key,
+        validated,
+    })
+}
+
+/// `GET /admin/api/plugins/catalog/{id}/preview` — verify a catalog package
+/// and report its authority delta without mutating plugin state.
+pub async fn preview_catalog_plugin(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+    Path(id): Path<String>,
+) -> ApiResult {
+    let manager = plugin_manager(&state)?;
+    let verified = verify_catalog_package(&state, &manager, &id).await?;
+
+    let current = manager.get(&id).await.map_err(ApiError::internal)?;
+    let (current_version, current_permissions) = match current {
+        Some(row) => {
+            let manifest = row
+                .manifest()
+                .ok_or_else(|| ApiError::bad("installed plugin manifest is unreadable"))?;
+            (Some(row.version), manifest.permissions)
+        }
+        None => (None, crate::plugins::Permissions::default()),
+    };
+
+    let target_permissions = verified.validated.manifest.permissions.clone();
+    let permission_diff = crate::plugins::manager::permission_diff(
+        &current_permissions,
+        &target_permissions,
+    );
+
+    Ok(Json(json!({
+        "id": verified.plugin.id,
+        "name": verified.plugin.name,
+        "current_version": current_version,
+        "target_version": verified.plugin.latest_version,
+        "sha256": verified
+            .plugin
+            .distribution
+            .as_ref()
+            .map(|distribution| distribution.sha256.clone())
+            .unwrap_or_default(),
+        "signature": "verified",
+        "permissions": target_permissions,
+        "permission_diff": permission_diff,
+        "provides": verified.validated.manifest.provides.provided(),
+        "source": format!(
+            "catalog:{}@{}",
+            verified.plugin.id, verified.plugin.latest_version
+        ),
+    })))
+}
+
+/// `POST /admin/api/plugins/catalog/{id}/install` — install a trusted catalog package.
+pub async fn install_catalog_plugin(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+    Path(id): Path<String>,
+) -> ApiResult {
+    let manager = plugin_manager(&state)?;
+    let verified = verify_catalog_package(&state, &manager, &id).await?;
+    let distribution = verified
+        .plugin
+        .distribution
+        .as_ref()
+        .ok_or_else(|| ApiError::bad("catalog plugin has no installable distribution"))?;
+    let source = format!(
+        "catalog:{}@{}",
+        verified.plugin.id, verified.plugin.latest_version
+    );
     let outcome = manager
-        .install_from_source(&bytes, Some(&distribution.sha256), &[key], false, &source)
+        .install_from_source(
+            &verified.bytes,
+            Some(&distribution.sha256),
+            &[verified.key],
+            false,
+            &source,
+        )
         .await
         .map_err(plugin_bad)?;
 
