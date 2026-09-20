@@ -850,10 +850,17 @@ Per plugin:
 closed
  -> repeated plugin faults
  -> open
- -> cooldown
- -> half-open probe
- -> closed
+ -> cooldown expires
+ -> atomically claim exactly one half-open probe
+ -> success / structured non-runtime error => closed
+ -> runtime fault => open for a new cooldown
+ -> client cancellation => open for a new cooldown without counting a fault
 ```
+
+While a half-open probe is in flight, other invocations for that plugin are
+rejected. The open-to-half-open transition is persisted atomically so concurrent
+requests cannot all become probes. `circuit_open_until` is an eligibility time,
+not a permanent disable marker.
 
 Count:
 
