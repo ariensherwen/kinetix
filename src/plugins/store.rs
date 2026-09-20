@@ -92,6 +92,7 @@ pub async fn upsert_plugin(
     component: &[u8],
     signature: &str,
     package_path: &str,
+    source: &str,
 ) -> Result<()> {
     let manifest_json = serde_json::to_string(&validated.manifest)?;
     let api_major = validated.manifest.api_major().unwrap_or(0) as i64;
@@ -140,7 +141,7 @@ pub async fn upsert_plugin(
     sqlx::query(
         "INSERT INTO plugin_packages
          (plugin_id, version, package_sha256, package_path, signature, source, installed_at)
-         VALUES (?,?,?,?,?,'local',?)
+         VALUES (?,?,?,?,?,?,?)
          ON CONFLICT(plugin_id, package_sha256) DO NOTHING",
     )
     .bind(&validated.manifest.id)
@@ -148,6 +149,7 @@ pub async fn upsert_plugin(
     .bind(sha256)
     .bind(package_path)
     .bind(signature)
+    .bind(source)
     .bind(&now)
     .execute(&mut *tx)
     .await?;
