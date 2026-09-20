@@ -349,13 +349,8 @@ impl PluginManager {
         let mut fields = Vec::new();
         for setting in &manifest.ui.settings {
             let storage_key = format!("{CONFIG_PREFIX}{}", setting.key);
-            let stored = store::kv_get(
-                &self.inner.pool,
-                &self.inner.crypto,
-                id,
-                &storage_key,
-            )
-            .await?;
+            let stored =
+                store::kv_get(&self.inner.pool, &self.inner.crypto, id, &storage_key).await?;
             let configured = stored.is_some();
             let value = if setting.kind == "secret" {
                 serde_json::Value::Null
