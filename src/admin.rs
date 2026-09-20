@@ -4174,6 +4174,47 @@ pub async fn plugin_auth_callback(
     Ok(Redirect::to("/admin/plugins?plugin_auth=success"))
 }
 
+#[derive(Deserialize)]
+pub struct PluginRollbackBody {
+    pub sha256: String,
+}
+
+/// `POST /admin/api/plugins/{id}/rollback` — reactivate a retained package.
+pub async fn rollback_plugin(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+    Path(id): Path<String>,
+    Json(body): Json<PluginRollbackBody>,
+) -> ApiResult {
+    let manager = plugin_manager(&state)?;
+    let outcome = manager.rollback(&id, body.sha256.trim()).await.map_err(plugin_bad)?;
+
+    let _ = db::insert_audit(
+        &state.pool,
+        "admin",
+        "plugin_rolled_back",
+        "plugin",
+        &outcome.id,
+        &outcome.id,
+        &format!(
+            "Reactivated retained plugin package v{} (SHA-256 {}). Plugin is disabled and permissions must be re-approved.",
+            outcome.version, outcome.package_sha256
+        ),
+    )
+    .await;
+
+    Ok(Json(json!({
+        "ok": true,
+        "id": outcome.id,
+        "version": outcome.version,
+        "sha256": outcome.package_sha256,
+        "signature": outcome.signature,
+        "provides": outcome.provides,
+        "enabled": false,
+        "note": "rollback activated package disabled; review permissions before enabling",
+    })))
+}
+
 /// `POST /admin/api/plugins/{id}/enable`.
 pub async fn enable_plugin(
     State(state): State<AppState>,
