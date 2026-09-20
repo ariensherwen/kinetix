@@ -393,6 +393,35 @@ pub fn validate(manifest: Manifest, policy: HostPolicy) -> Result<ValidatedManif
     for host in &manifest.permissions.network_hosts {
         validate_network_host(host)?;
     }
+    for scope in &manifest.permissions.credential_scopes {
+        if scope == "*" {
+            continue;
+        }
+        if let Some(provider_id) = scope.strip_prefix("provider:") {
+            if provider_id.trim().is_empty() {
+                bail!("credential scope 'provider:' requires a provider id");
+            }
+            continue;
+        }
+        if let Some(strategy) = scope.strip_prefix("credential_strategy:") {
+            if !manifest
+                .provides
+                .credential_strategies
+                .iter()
+                .any(|provided| provided == strategy)
+            {
+                bail!(
+                    "credential scope '{}' references a credential strategy this plugin does not provide",
+                    scope
+                );
+            }
+            continue;
+        }
+        bail!(
+            "invalid credential scope '{}': expected '*', 'provider:<id>', or 'credential_strategy:<name>'",
+            scope
+        );
+    }
 
     // §6.4: a routing-fact provider must declare a determinism mode the host can
     // enforce. `pure` means no outbound HTTP on the request path (enforced by
@@ -724,6 +753,20 @@ storage = "2MiB"
         let err = parse_and_validate(&bad, HostPolicy::default()).unwrap_err();
         assert!(
             err.to_string().contains("unsupported kind 'script'"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn rejects_binding_scope_for_unknown_credential_strategy() {
+        let bad = GOOD.replace(
+            "network_hosts = [\"api.foo.example\", \"*.svc.example\"]",
+            "network_hosts = [\"api.foo.example\", \"*.svc.example\"]\ncredential_scopes = [\"credential_strategy:missing\"]",
+        );
+        let err = parse_and_validate(&bad, HostPolicy::default()).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("references a credential strategy this plugin does not provide"),
             "{err}"
         );
     }
