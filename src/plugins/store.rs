@@ -846,6 +846,11 @@ mod tests {
         kv_put_limited(&pool, &crypto, "p", "ordinary", b"xx", 64)
             .await
             .unwrap();
+        // '_' is a SQL LIKE wildcard, so this key specifically proves prefix
+        // operations use literal matching rather than LIKE semantics.
+        kv_put_limited(&pool, &crypto, "p", "xcache:unrelated", b"keep", 64)
+            .await
+            .unwrap();
         kv_replace_prefix_limited(
             &pool,
             &crypto,
@@ -878,6 +883,12 @@ mod tests {
         assert_eq!(
             kv_get(&pool, &crypto, "p", "ordinary").await.unwrap(),
             Some(b"xx".to_vec())
+        );
+        assert_eq!(
+            kv_get(&pool, &crypto, "p", "xcache:unrelated")
+                .await
+                .unwrap(),
+            Some(b"keep".to_vec())
         );
 
         let err = kv_replace_prefix_limited(
