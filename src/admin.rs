@@ -3777,8 +3777,13 @@ pub async fn preview_catalog_plugin_update(
         .ok_or_else(|| ApiError::bad("installed plugin manifest is unreadable"))?;
 
     let target = verified_catalog_artifact(&state, manager, &id).await?;
-    if current.package_sha256.eq_ignore_ascii_case(&target.distribution.sha256) {
-        return Err(ApiError::bad("installed plugin already matches the catalog package"));
+    if current
+        .package_sha256
+        .eq_ignore_ascii_case(&target.distribution.sha256)
+    {
+        return Err(ApiError::bad(
+            "installed plugin already matches the catalog package",
+        ));
     }
 
     let permission_diff = crate::plugins::manager::permission_diff(
