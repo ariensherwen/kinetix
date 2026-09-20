@@ -146,9 +146,18 @@ pub fn validate(manifest: Manifest, policy: HostPolicy) -> Result<ValidatedManif
             }
         }
         if let Some(name) = &integration.model_source {
-            if !manifest.provides.model_sources.contains(name) {
+            let legacy = manifest.provides.model_sources.contains(name);
+            let account = manifest.provides.account_model_sources.contains(name);
+            if !legacy && !account {
                 bail!(
                     "integration '{}' references unknown model_source '{}'",
+                    integration.id,
+                    name
+                );
+            }
+            if legacy && account {
+                bail!(
+                    "integration '{}' model_source '{}' is declared in both legacy and account-aware discovery lists",
                     integration.id,
                     name
                 );
