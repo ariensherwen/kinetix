@@ -274,6 +274,11 @@ export const Kinetix = {
     ),
   installPlugin: (body: PluginInstallInput) =>
     api.post<PluginInstallResult>('/admin/api/plugins/install', body),
+  startPluginAuth: (plugin_id: string, flow_name: string, provider_id: string) =>
+    api.post<{ authorize_url: string; state: string; expires_in_secs: number }>(
+      '/admin/api/plugins/auth/start',
+      { plugin_id, flow_name, provider_id },
+    ),
   approvePluginPermissions: (id: string) =>
     api.post<{ ok: boolean; id: string; approved: PluginPermissionGrant[] }>(
       `/admin/api/plugins/${encodeURIComponent(id)}/permissions/approve`,
