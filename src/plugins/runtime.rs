@@ -150,6 +150,10 @@ pub struct HostCtx {
     pub credential_scopes: Vec<String>,
     /// Storage quota in bytes.
     pub storage_quota: u64,
+    /// Cached routing facts published during one background refresh. These
+    /// remain invocation-local until the manager atomically commits the full
+    /// snapshot after a successful guest call.
+    pub pending_cache: std::collections::BTreeMap<String, (String, u64)>,
     /// Max outbound requests per invocation.
     pub max_outbound_requests: u32,
     /// Max outbound body size.
@@ -657,8 +661,8 @@ impl bindings::kinetix::plugin::host_storage::Host for HostCtx {
     }
 
     async fn put(&mut self, key: String, value: Vec<u8>) -> anyhow::Result<Result<(), String>> {
-        if key.starts_with(CONFIG_PREFIX) {
-            return Ok(Err("host-owned config namespace is read-only".into()));
+        if key.starts_with(CONFIG_PREFIX) || key.starts_with(CACHE_PREFIX) {
+            return Ok(Err("host-owned storage namespace is read-only".into()));
         }
         match self
             .backing
@@ -671,8 +675,8 @@ impl bindings::kinetix::plugin::host_storage::Host for HostCtx {
     }
 
     async fn delete(&mut self, key: String) -> anyhow::Result<Result<(), String>> {
-        if key.starts_with(CONFIG_PREFIX) {
-            return Ok(Err("host-owned config namespace is read-only".into()));
+        if key.starts_with(CONFIG_PREFIX) || key.starts_with(CACHE_PREFIX) {
+            return Ok(Err("host-owned storage namespace is read-only".into()));
         }
         match self.backing.kv_delete(&self.plugin_id, &key).await {
             Ok(()) => Ok(Ok(())),
@@ -686,35 +690,31 @@ impl bindings::kinetix::plugin::host_storage::Host for HostCtx {
         value_json: String,
         max_age_ms: u64,
     ) -> anyhow::Result<Result<(), String>> {
-        // §6.4: cached routing facts are host-stamped so a `cached` provider
-        // cannot make Routes non-deterministic by lying about `observed_at`.
+        // §6.4: cache publication is allowed only during the core-owned
+        // background refresh. Values stay invocation-local until the complete
+        // refresh succeeds, then the manager host-stamps and atomically commits
+        // the snapshot.
+        if self.capability != "routing_facts.refresh" {
+            return Ok(Err(
+                "cache publication is only available during cached routing-fact refresh".into(),
+            ));
+        }
+        if name.is_empty()
+            || name.len() > 128
+            || !name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+        {
+            return Ok(Err("invalid cached routing fact name".into()));
+        }
         if serde_json::from_str::<serde_json::Value>(&value_json).is_err() {
             return Ok(Err("cache value is not valid JSON".into()));
         }
         if max_age_ms == 0 || max_age_ms > 24 * 3600 * 1000 {
             return Ok(Err("max_age_ms out of range".into()));
         }
-        let envelope = serde_json::json!({
-            "value": serde_json::from_str::<serde_json::Value>(&value_json)
-                .unwrap_or(serde_json::Value::Null),
-            "observed_at": crate::db::now_iso(),
-            "max_age_ms": max_age_ms,
-        })
-        .to_string();
-        let key = format!("{CACHE_PREFIX}{name}");
-        match self
-            .backing
-            .kv_put_limited(
-                &self.plugin_id,
-                &key,
-                envelope.as_bytes(),
-                self.storage_quota,
-            )
-            .await
-        {
-            Ok(()) => Ok(Ok(())),
-            Err(e) => Ok(Err(format!("cache write failed: {e}"))),
-        }
+        self.pending_cache.insert(name, (value_json, max_age_ms));
+        Ok(Ok(()))
     }
 }
 
