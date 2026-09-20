@@ -826,6 +826,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cached_snapshot_replace_is_atomic_and_removes_old_keys() {
+        let (pool, crypto, dir) = test_store().await;
+
+        kv_put_limited(&pool, &crypto, "p", "ordinary", b"xx", 64)
+            .await
+            .unwrap();
+        kv_replace_prefix_limited(
+            &pool,
+            &crypto,
+            "p",
+            "_cache:",
+            &[
+                ("_cache:a".into(), b"one".to_vec()),
+                ("_cache:b".into(), b"two".to_vec()),
+            ],
+            64,
+        )
+        .await
+        .unwrap();
+
+        kv_replace_prefix_limited(
+            &pool,
+            &crypto,
+            "p",
+            "_cache:",
+            &[("_cache:b".into(), b"new".to_vec())],
+            64,
+        )
+        .await
+        .unwrap();
+
+        let snapshot = kv_list_prefix(&pool, &crypto, "p", "_cache:")
+            .await
+            .unwrap();
+        assert_eq!(snapshot, vec![("_cache:b".into(), b"new".to_vec())]);
+        assert_eq!(
+            kv_get(&pool, &crypto, "p", "ordinary").await.unwrap(),
+            Some(b"xx".to_vec())
+        );
+
+        let err = kv_replace_prefix_limited(
+            &pool,
+            &crypto,
+            "p",
+            "_cache:",
+            &[("_cache:c".into(), vec![b'x'; 64])],
+            64,
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("storage quota exceeded"), "{err}");
+
+        // Failed replacement leaves the previous complete snapshot untouched.
+        let snapshot = kv_list_prefix(&pool, &crypto, "p", "_cache:")
+            .await
+            .unwrap();
+        assert_eq!(snapshot, vec![("_cache:b".into(), b"new".to_vec())]);
+
+        pool.close().await;
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
     async fn concurrent_kv_writers_cannot_overcommit_quota() {
         let (pool, crypto, dir) = test_store().await;
         let pool_a = pool.clone();
