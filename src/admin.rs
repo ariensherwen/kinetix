@@ -3779,10 +3779,8 @@ pub async fn preview_catalog_plugin(
     };
 
     let target_permissions = verified.validated.manifest.permissions.clone();
-    let permission_diff = crate::plugins::manager::permission_diff(
-        &current_permissions,
-        &target_permissions,
-    );
+    let permission_diff =
+        crate::plugins::manager::permission_diff(&current_permissions, &target_permissions);
 
     Ok(Json(json!({
         "id": verified.plugin.id,
