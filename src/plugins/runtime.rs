@@ -518,11 +518,7 @@ impl HostCtx {
 
     async fn scope_allows(&self, provider_id: &str) -> Result<bool> {
         self.backing
-            .credential_scope_allows(
-                &self.plugin_id,
-                provider_id,
-                &self.credential_scopes,
-            )
+            .credential_scope_allows(&self.plugin_id, provider_id, &self.credential_scopes)
             .await
     }
 }
@@ -670,10 +666,7 @@ impl bindings::kinetix::plugin::host_credential::Host for HostCtx {
                 return Ok(Err(err("invalid_configuration", "named credential")));
             }
         };
-        let scoped = self
-            .scope_allows(&provider_id)
-            .await
-            .unwrap_or(false);
+        let scoped = self.scope_allows(&provider_id).await.unwrap_or(false);
         if !scoped {
             return Ok(Err(err(
                 "permission_denied",
