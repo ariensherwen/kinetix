@@ -17,6 +17,7 @@ import {
 import {
   Kinetix,
   PluginCatalogEntry,
+  PluginCatalogPreview,
   PluginDetail,
   PluginPermissionResponse,
   PluginRollbackPreview,
@@ -83,6 +84,7 @@ export const PluginsView: React.FC = () => {
   const [settings, setSettings] = useState<PluginSettingState[]>([]);
   const [settingDrafts, setSettingDrafts] = useState<Record<string, string | boolean>>({});
   const [rollbackPreview, setRollbackPreview] = useState<PluginRollbackPreview | null>(null);
+  const [catalogPreview, setCatalogPreview] = useState<PluginCatalogPreview | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -324,10 +326,25 @@ export const PluginsView: React.FC = () => {
     setNotice(null);
     try {
       const outcome = await Kinetix.installCatalogPlugin(entry.id);
+      setCatalogPreview(null);
       setNotice(
         `Installed ${outcome.id} v${outcome.version} from the trusted catalog. Review permissions before enabling it.`,
       );
       await refresh(outcome.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const reviewCatalogUpdate = async (entry: PluginCatalogEntry) => {
+    setBusy(`catalog-preview:${entry.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      const preview = await Kinetix.previewCatalogPlugin(entry.id);
+      setCatalogPreview(preview);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -588,14 +605,20 @@ export const PluginsView: React.FC = () => {
                         variant="primary"
                         className="gap-2"
                         disabled={busy !== null}
-                        onClick={() => void installFromCatalog(entry)}
+                        onClick={() =>
+                          void (installed
+                            ? reviewCatalogUpdate(entry)
+                            : installFromCatalog(entry))
+                        }
                       >
                         <PackagePlus className="w-4 h-4" />
                         {busy === `catalog:${entry.id}`
                           ? 'Installing…'
-                          : installed
-                            ? `Update to v${entry.latest_version}`
-                            : 'Install'}
+                          : busy === `catalog-preview:${entry.id}`
+                            ? 'Reviewing…'
+                            : installed
+                              ? `Review update to v${entry.latest_version}`
+                              : 'Install'}
                       </SketchButton>
                     ) : (
                       <SketchBadge variant="yellow">
@@ -605,6 +628,85 @@ export const PluginsView: React.FC = () => {
                       </SketchBadge>
                     )}
                   </div>
+
+                  {catalogPreview?.id === entry.id && (
+                    <div className="mt-4 p-3 border-2 border-dashed border-[var(--ink)]/30 bg-[var(--erased)]/50 space-y-3">
+                      <div>
+                        <div className="font-heading font-bold text-sm">
+                          Verified update review
+                        </div>
+                        <p className="text-xs font-body text-[var(--ink)]/65">
+                          v{catalogPreview.current_version} → v{catalogPreview.target_version}.
+                          Installing this candidate will disable the plugin and clear all approved permissions.
+                        </p>
+                      </div>
+
+                      {catalogPreview.permission_diff && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs font-mono">
+                          <div>
+                            <div className="font-bold font-heading text-sm">Network hosts</div>
+                            {catalogPreview.permission_diff.network_hosts.added.length === 0 &&
+                            catalogPreview.permission_diff.network_hosts.removed.length === 0 ? (
+                              <div className="text-[var(--ink)]/55">No change</div>
+                            ) : (
+                              <>
+                                {catalogPreview.permission_diff.network_hosts.added.map((value) => (
+                                  <div key={`catalog-host-add-${value}`}>+ {value}</div>
+                                ))}
+                                {catalogPreview.permission_diff.network_hosts.removed.map((value) => (
+                                  <div key={`catalog-host-remove-${value}`}>− {value}</div>
+                                ))}
+                              </>
+                            )}
+                          </div>
+                          <div>
+                            <div className="font-bold font-heading text-sm">Credential scopes</div>
+                            {catalogPreview.permission_diff.credential_scopes.added.length === 0 &&
+                            catalogPreview.permission_diff.credential_scopes.removed.length === 0 ? (
+                              <div className="text-[var(--ink)]/55">No change</div>
+                            ) : (
+                              <>
+                                {catalogPreview.permission_diff.credential_scopes.added.map((value) => (
+                                  <div key={`catalog-scope-add-${value}`}>+ {value}</div>
+                                ))}
+                                {catalogPreview.permission_diff.credential_scopes.removed.map((value) => (
+                                  <div key={`catalog-scope-remove-${value}`}>− {value}</div>
+                                ))}
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {catalogPreview.permission_diff?.credential_read.changed && (
+                        <div className="text-xs font-mono">
+                          credential_read:{' '}
+                          {catalogPreview.permission_diff.credential_read.from ? 'enabled' : 'disabled'}
+                          {' → '}
+                          {catalogPreview.permission_diff.credential_read.to ? 'enabled' : 'disabled'}
+                        </div>
+                      )}
+
+                      <div className="flex gap-2 flex-wrap">
+                        <SketchButton
+                          variant="primary"
+                          disabled={busy !== null}
+                          onClick={() => void installFromCatalog(entry)}
+                        >
+                          {busy === `catalog:${entry.id}`
+                            ? 'Installing…'
+                            : `Confirm update to v${catalogPreview.target_version}`}
+                        </SketchButton>
+                        <SketchButton
+                          variant="secondary"
+                          disabled={busy !== null}
+                          onClick={() => setCatalogPreview(null)}
+                        >
+                          Cancel
+                        </SketchButton>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
