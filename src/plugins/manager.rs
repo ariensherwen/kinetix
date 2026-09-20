@@ -1630,7 +1630,7 @@ fn list_permission_diff(from: &[String], to: &[String]) -> PermissionListDiff {
     }
 }
 
-fn permission_diff(from: &Permissions, to: &Permissions) -> PermissionDiff {
+pub(crate) fn permission_diff(from: &Permissions, to: &Permissions) -> PermissionDiff {
     PermissionDiff {
         network_hosts: list_permission_diff(&from.network_hosts, &to.network_hosts),
         credential_scopes: list_permission_diff(&from.credential_scopes, &to.credential_scopes),
