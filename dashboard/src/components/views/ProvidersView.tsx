@@ -50,7 +50,7 @@ export const ProvidersView: React.FC<ProvidersViewProps> = ({
   // New Provider Form State
   const [name, setName] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
-  const [wireFormat, setWireFormat] = useState<'gemini' | 'openai' | 'anthropic'>('gemini');
+  const [wireFormat, setWireFormat] = useState<'gemini' | 'openai' | 'anthropic' | 'plugin'>('gemini');
   const [authScheme, setAuthScheme] = useState<'bearer' | 'custom_header' | 'query_param'>('bearer');
   const [customHeader, setCustomHeader] = useState('');
   const [customParam, setCustomParam] = useState('');
@@ -907,6 +907,7 @@ export const ProvidersView: React.FC<ProvidersViewProps> = ({
                       <option value="gemini">Gemini API</option>
                       <option value="openai">OpenAI Compatible</option>
                       <option value="anthropic">Anthropic Messages</option>
+                      <option value="plugin">Plugin adapter</option>
                     </select>
                   </div>
 
