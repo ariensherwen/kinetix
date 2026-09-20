@@ -373,7 +373,7 @@ Once enabled, bind the plugin's capabilities to providers in your configuration 
 [[providers]]
 name = "Google Antigravity"
 base_url = "https://autopush-alkalimakersuite-pa.sandbox.googleapis.com"
-wire_format = "antigravity"
+wire_format = "plugin"
 auth_scheme = "bearer"
 wire_plugin = "plugin:dev.kinetix.antigravity-oauth/antigravity"
 credential_plugin = "plugin:dev.kinetix.antigravity-oauth/antigravity-oauth"
