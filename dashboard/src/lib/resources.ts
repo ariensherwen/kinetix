@@ -88,6 +88,20 @@ export interface PluginCatalogResponse {
   plugins: PluginCatalogEntry[];
 }
 
+export interface PluginIntegrationProvider {
+  base_url: string;
+  wire_format: string;
+  auth_scheme: string;
+  custom_header_name?: string | null;
+  custom_param_name?: string | null;
+  extra_headers: Record<string, string>;
+  timeout_ms: number;
+  capability_mode: string;
+  models_path?: string | null;
+  follow_redirects: boolean;
+  credential_hosts: string[];
+}
+
 export interface PluginIntegration {
   id: string;
   name: string;
@@ -96,6 +110,7 @@ export interface PluginIntegration {
   credential_strategy?: string | null;
   auth_flow?: string | null;
   model_source?: string | null;
+  provider?: PluginIntegrationProvider | null;
 }
 
 export interface PluginUiAction {
@@ -379,6 +394,10 @@ export const Kinetix = {
     ),
   installPlugin: (body: PluginInstallInput) =>
     api.post<PluginInstallResult>('/admin/api/plugins/install', body),
+  setupPluginIntegrationProvider: (pluginId: string, integrationId: string) =>
+    api.post<{ id: string; name: string; created: boolean }>(
+      `/admin/api/plugins/${encodeURIComponent(pluginId)}/integrations/${encodeURIComponent(integrationId)}/provider`,
+    ),
   startPluginAuth: (plugin_id: string, flow_name: string, provider_id: string) =>
     api.post<{ authorize_url: string; state: string; expires_in_secs: number }>(
       '/admin/api/plugins/auth/start',
