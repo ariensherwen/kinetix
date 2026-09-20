@@ -5,7 +5,7 @@
 //! Wasmtime for request-path work, and it always maps guest results into typed
 //! evidence that core policy consumes.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -222,6 +222,35 @@ impl PluginManager {
                 .iter()
                 .map(|entry| entry.value().http_requests.load(Relaxed))
                 .sum(),
+        }
+    }
+
+    pub fn metrics_for_plugin(&self, id: &str) -> PluginMetricsSnapshot {
+        use std::sync::atomic::Ordering::Relaxed;
+
+        let mut totals = PluginCapabilityCounters::default();
+        let mut by_capability = BTreeMap::new();
+        for entry in self.inner.metrics.iter() {
+            let (plugin_id, capability) = entry.key();
+            if plugin_id != id {
+                continue;
+            }
+            let cell = entry.value();
+            let counters = PluginCapabilityCounters {
+                invocations: cell.invocations.load(Relaxed),
+                successes: cell.successes.load(Relaxed),
+                faults: cell.faults.load(Relaxed),
+                timeouts: cell.timeouts.load(Relaxed),
+                cancellations: cell.cancellations.load(Relaxed),
+                http_requests: cell.http_requests.load(Relaxed),
+                duration_micros: cell.duration_micros.load(Relaxed),
+            };
+            totals.add_assign(&counters);
+            by_capability.insert(capability.clone(), counters);
+        }
+        PluginMetricsSnapshot {
+            totals,
+            by_capability,
         }
     }
 
@@ -544,6 +573,7 @@ impl PluginManager {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .remove(id);
+        self.inner.metrics.retain(|(plugin_id, _), _| plugin_id != id);
         Ok(())
     }
 
@@ -1728,7 +1758,36 @@ fn map_adapter_result<T>(
     })
 }
 
-/// Host-side counters surfaced by the admin metrics endpoint (§18).
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct PluginCapabilityCounters {
+    pub invocations: u64,
+    pub successes: u64,
+    pub faults: u64,
+    pub timeouts: u64,
+    pub cancellations: u64,
+    pub http_requests: u64,
+    pub duration_micros: u64,
+}
+
+impl PluginCapabilityCounters {
+    fn add_assign(&mut self, other: &Self) {
+        self.invocations = self.invocations.saturating_add(other.invocations);
+        self.successes = self.successes.saturating_add(other.successes);
+        self.faults = self.faults.saturating_add(other.faults);
+        self.timeouts = self.timeouts.saturating_add(other.timeouts);
+        self.cancellations = self.cancellations.saturating_add(other.cancellations);
+        self.http_requests = self.http_requests.saturating_add(other.http_requests);
+        self.duration_micros = self.duration_micros.saturating_add(other.duration_micros);
+    }
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct PluginMetricsSnapshot {
+    pub totals: PluginCapabilityCounters,
+    pub by_capability: BTreeMap<String, PluginCapabilityCounters>,
+}
+
+/// Host-side global counters surfaced by the admin metrics endpoint (§18).
 #[derive(Debug, Clone, Copy, serde::Serialize)]
 pub struct PluginCounters {
     pub invocations: u64,
