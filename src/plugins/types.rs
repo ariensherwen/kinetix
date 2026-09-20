@@ -146,6 +146,23 @@ fn default_storage() -> String {
     "2MiB".into()
 }
 
+/// A user-facing integration assembled from one or more capabilities provided
+/// by the same plugin. This is presentation/configuration metadata only; it
+/// grants no authority and introduces no browser-executable code.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Integration {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub provider_adapter: Option<String>,
+    #[serde(default)]
+    pub credential_strategy: Option<String>,
+    #[serde(default)]
+    pub model_source: Option<String>,
+}
+
 /// A parsed `plugin.toml` (§5).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
@@ -156,6 +173,8 @@ pub struct Manifest {
     pub plugin_api: String,
     #[serde(default)]
     pub provides: Provides,
+    #[serde(default)]
+    pub integrations: Vec<Integration>,
     #[serde(default)]
     pub permissions: Permissions,
     #[serde(default)]
