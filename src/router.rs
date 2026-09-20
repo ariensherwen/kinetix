@@ -141,6 +141,7 @@ pub fn build(state: AppState) -> Router {
         .route("/plugins/{id}/enable", post(admin::enable_plugin))
         .route("/plugins/{id}/disable", post(admin::disable_plugin))
         .route("/plugins/{id}/validate", post(admin::validate_plugin))
+        .route("/plugins/{id}/rollback", post(admin::rollback_plugin))
         .route(
             "/plugins/{id}/settings",
             get(admin::plugin_settings).put(admin::update_plugin_settings),
