@@ -371,6 +371,68 @@ fn err(code: &str, message: impl Into<String>) -> wit::types::PluginError {
     }
 }
 
+async fn pinned_plugin_http_client(host: &str, port: u16) -> Result<reqwest::Client, String> {
+    let mut builder = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
+        .https_only(true)
+        .no_proxy()
+        .user_agent(concat!("kinetix-plugin/", env!("CARGO_PKG_VERSION")));
+
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        if crate::admin::is_blocked_ip(ip) {
+            return Err(format!(
+                "host '{host}' is a blocked private/link-local/metadata address"
+            ));
+        }
+    } else {
+        let resolved = tokio::net::lookup_host((host, port))
+            .await
+            .map_err(|e| format!("DNS resolution for '{host}' failed: {e}"))?;
+
+        let mut addrs = Vec::new();
+        for addr in resolved {
+            let ip = addr.ip();
+            if crate::admin::is_blocked_ip(ip) {
+                return Err(format!(
+                    "host '{host}' resolves to a blocked private/link-local/metadata address ({ip})"
+                ));
+            }
+            let pinned = std::net::SocketAddr::new(ip, 0);
+            if !addrs.contains(&pinned) {
+                addrs.push(pinned);
+            }
+        }
+        if addrs.is_empty() {
+            return Err(format!("DNS resolution for '{host}' returned no addresses"));
+        }
+
+        // Pin reqwest to exactly the addresses we just checked. TLS SNI and the
+        // HTTP authority remain the original hostname.
+        builder = builder.resolve_to_addrs(host, &addrs);
+    }
+
+    builder
+        .build()
+        .map_err(|e| format!("building pinned HTTP client failed: {e}"))
+}
+
+fn forbidden_plugin_header(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "host"
+            | "connection"
+            | "proxy-authorization"
+            | "proxy-authenticate"
+            | "proxy-connection"
+            | "transfer-encoding"
+            | "upgrade"
+            | "te"
+            | "trailer"
+            | "content-length"
+    )
+}
+
 impl bindings::kinetix::plugin::types::Host for HostCtx {}
 
 impl bindings::kinetix::plugin::host_http::Host for HostCtx {
@@ -403,6 +465,12 @@ impl bindings::kinetix::plugin::host_http::Host for HostCtx {
                 "only https outbound requests are permitted",
             )));
         }
+        if !parsed.username().is_empty() || parsed.password().is_some() {
+            return Ok(Err(err(
+                "invalid_configuration",
+                "outbound URL may not contain userinfo",
+            )));
+        }
         let Some(host) = parsed.host_str().map(|h| h.to_ascii_lowercase()) else {
             return Ok(Err(err("invalid_configuration", "URL has no host")));
         };
@@ -421,17 +489,29 @@ impl bindings::kinetix::plugin::host_http::Host for HostCtx {
             return Ok(Err(err("permission_denied", "request body too large")));
         }
 
+        let port = parsed.port_or_known_default().unwrap_or(443);
+        let client = match pinned_plugin_http_client(&host, port).await {
+            Ok(client) => client,
+            Err(message) => return Ok(Err(err("permission_denied", message))),
+        };
+
         // Credential injection is a host responsibility (§8.1). The plugin only
         // references a credential; it never sees the bytes.
         let mut builder = match req.method.to_ascii_uppercase().as_str() {
-            "GET" => self.http.get(parsed.clone()),
-            "POST" => self.http.post(parsed.clone()),
-            "PUT" => self.http.put(parsed.clone()),
-            "DELETE" => self.http.delete(parsed.clone()),
-            "PATCH" => self.http.patch(parsed.clone()),
+            "GET" => client.get(parsed.clone()),
+            "POST" => client.post(parsed.clone()),
+            "PUT" => client.put(parsed.clone()),
+            "DELETE" => client.delete(parsed.clone()),
+            "PATCH" => client.patch(parsed.clone()),
             _ => return Ok(Err(err("invalid_configuration", "unsupported method"))),
         };
         for (k, v) in &req.headers {
+            if forbidden_plugin_header(k) {
+                return Ok(Err(err(
+                    "invalid_configuration",
+                    format!("outbound header '{k}' is not permitted"),
+                )));
+            }
             builder = builder.header(k, v);
         }
         if let Some(cred) = &req.credential {
