@@ -4,7 +4,7 @@
 //! helpers. Plugin KV is encrypted at rest using the host crypto with a
 //! separate key label derived from the master key (§10, §8.3).
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Row};
@@ -379,6 +379,85 @@ pub async fn kv_put(
     Ok(())
 }
 
+/// Encrypt and store a plugin KV entry only if the plugin's plaintext-value
+/// storage quota remains satisfied.
+///
+/// The check runs under `BEGIN IMMEDIATE`, serializing competing writers before
+/// usage is measured. Replacing an existing key subtracts its old plaintext
+/// value length before adding the new one.
+pub async fn kv_put_limited(
+    pool: &Pool,
+    crypto: &Crypto,
+    plugin_id: &str,
+    key: &str,
+    value: &[u8],
+    quota: u64,
+) -> Result<()> {
+    let plaintext = base64::engine::general_purpose::STANDARD.encode(value);
+    let enc = crypto.encrypt_kv(&plaintext)?;
+
+    let mut conn = pool.acquire().await?;
+    sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
+
+    let result: Result<()> = async {
+        let rows = sqlx::query("SELECT key, value FROM plugin_kv WHERE plugin_id = ?")
+            .bind(plugin_id)
+            .fetch_all(&mut *conn)
+            .await?;
+
+        let mut used = 0_u64;
+        for row in rows {
+            let existing_key: String = row.get("key");
+            if existing_key == key {
+                continue;
+            }
+            let encrypted: Vec<u8> = row.get("value");
+            let encrypted =
+                String::from_utf8(encrypted).context("plugin KV ciphertext not utf-8")?;
+            let encoded = crypto.decrypt_kv(&encrypted)?;
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(encoded.trim())
+                .context("plugin KV plaintext not base64")?;
+            used = used
+                .checked_add(decoded.len() as u64)
+                .context("plugin KV usage overflow")?;
+        }
+
+        let projected = used
+            .checked_add(value.len() as u64)
+            .context("plugin KV usage overflow")?;
+        if projected > quota {
+            bail!(
+                "storage quota exceeded: projected {projected} bytes exceeds {quota} bytes"
+            );
+        }
+
+        sqlx::query(
+            "INSERT INTO plugin_kv (plugin_id, key, value, updated_at) VALUES (?,?,?,?)
+             ON CONFLICT(plugin_id, key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+        )
+        .bind(plugin_id)
+        .bind(key)
+        .bind(enc.as_bytes())
+        .bind(crate::db::now_iso())
+        .execute(&mut *conn)
+        .await?;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => {
+            sqlx::query("COMMIT").execute(&mut *conn).await?;
+            Ok(())
+        }
+        Err(error) => {
+            let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+            Err(error)
+        }
+    }
+}
+
 pub async fn kv_get(
     pool: &Pool,
     crypto: &Crypto,
@@ -446,7 +525,8 @@ pub async fn kv_list_prefix(
     Ok(out)
 }
 
-/// Total bytes stored for a plugin (for quota enforcement, §14).
+/// Encrypted bytes persisted for a plugin. This is diagnostic only; storage
+/// quota enforcement uses plaintext value lengths in `kv_put_limited`.
 pub async fn kv_bytes(pool: &Pool, plugin_id: &str) -> Result<u64> {
     let row = sqlx::query(
         "SELECT COALESCE(SUM(LENGTH(value)), 0) AS n FROM plugin_kv WHERE plugin_id = ?",
