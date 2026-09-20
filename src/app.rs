@@ -282,3 +282,44 @@ impl AppState {
         let _ = Ordering::Relaxed;
     }
 }
+
+#[cfg(test)]
+mod hook_dispatch_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn blocked_hook_job_does_not_block_next_job() {
+        let (tx, rx) = tokio::sync::mpsc::channel::<HookJob>(HOOK_QUEUE_CAPACITY);
+        spawn_hook_worker(rx);
+
+        let gate = Arc::new(tokio::sync::Notify::new());
+        let (first_started_tx, first_started_rx) = tokio::sync::oneshot::channel();
+        let first_gate = gate.clone();
+        let first: HookJob = Box::new(move || {
+            Box::pin(async move {
+                let _ = first_started_tx.send(());
+                first_gate.notified().await;
+            })
+        });
+        tx.send(first).await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_millis(100), first_started_rx)
+            .await
+            .expect("first hook should start")
+            .unwrap();
+
+        let (second_started_tx, second_started_rx) = tokio::sync::oneshot::channel();
+        let second: HookJob = Box::new(move || {
+            Box::pin(async move {
+                let _ = second_started_tx.send(());
+            })
+        });
+        tx.send(second).await.unwrap();
+
+        tokio::time::timeout(std::time::Duration::from_millis(100), second_started_rx)
+            .await
+            .expect("second hook should start while first hook is blocked")
+            .unwrap();
+
+        gate.notify_waiters();
+    }
+}
