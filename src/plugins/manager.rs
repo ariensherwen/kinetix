@@ -929,6 +929,7 @@ impl PluginManager {
             permissions: Default::default(),
             limits: Limits::default(),
             routing_facts_mode: "pure".into(),
+            routing_facts_refresh_ms: 30_000,
         });
         // Runtime authority is derived only from approved grant rows.
         let mut network_hosts = Vec::new();
