@@ -291,6 +291,18 @@ CredentialLease {
 The handle is opaque. When possible, the plugin uses it through the host HTTP capability without
 ever receiving plaintext secret bytes.
 
+### 6.1.1 Credential-to-discovery handoff
+
+When a provider binds both a plugin credential strategy and a model source from
+the same plugin, the admin discovery path resolves one provider account before
+calling `ModelSource::discover`. This gives the plugin a chance to refresh its
+short-lived credential and persist only provider-scoped discovery state in its
+encrypted KV namespace.
+
+The WIT does not pass account secrets or account ids into `ModelSource`, and
+the browser receives neither. This keeps discovery provider-scoped while
+avoiding a second credential-bearing ABI.
+
 ### 6.2 ModelSource
 
 Returns discovery **observations**:
