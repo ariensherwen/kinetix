@@ -976,30 +976,58 @@ pub async fn discover_models(
         if let Some(pref) = provider.model_source_plugin_ref() {
             let manager = plugin_manager(&state)?;
             let reference = format!("plugin:{}/{}", pref.plugin_id, pref.capability);
-            if manager
+            let account_aware = manager
+                .resolve_binding(
+                    &reference,
+                    crate::plugins::Capability::AccountModelSource,
+                )
+                .await
+                .is_some();
+            let legacy = manager
                 .resolve_binding(&reference, crate::plugins::Capability::ModelSource)
                 .await
-                .is_none()
-            {
+                .is_some();
+            if !account_aware && !legacy {
                 return Err(ApiError::bad(format!(
                     "provider is bound to unavailable plugin model source '{reference}'"
                 )));
             }
+
             let models_path = provider.models_path.clone().unwrap_or_default();
-            let list = manager
-                .model_discover(
-                    &pref.plugin_id,
-                    &provider.id,
-                    &provider.base_url,
-                    &models_path,
-                )
-                .await
-                .map_err(|f| {
-                    ApiError::bad(format!(
-                        "plugin model discovery failed: {}",
-                        crate::crypto::redact(&f.message())
-                    ))
-                })?;
+            let list = if account_aware {
+                let accounts = db::accounts_for_provider(&state.pool, &provider.id)
+                    .await
+                    .map_err(ApiError::internal)?;
+                let account = accounts
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| ApiError::bad("provider has no credentials to discover with"))?;
+                manager
+                    .account_model_discover(
+                        &pref.plugin_id,
+                        &provider.id,
+                        &account.id,
+                        &provider.base_url,
+                        &models_path,
+                    )
+                    .await
+            } else {
+                manager
+                    .model_discover(
+                        &pref.plugin_id,
+                        &provider.id,
+                        &provider.base_url,
+                        &models_path,
+                    )
+                    .await
+            }
+            .map_err(|f| {
+                ApiError::bad(format!(
+                    "plugin model discovery failed: {}",
+                    crate::crypto::redact(&f.message())
+                ))
+            })?;
+
             list.into_iter()
                 .map(|m| crate::adapters::DiscoveredModel {
                     id: m.id,
