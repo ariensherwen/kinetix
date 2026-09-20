@@ -116,6 +116,7 @@ version = "0.1.0"
 
 [provides]
 credential_strategies = ["antigravity-oauth"]
+auth_flows = ["antigravity"]
 provider_adapters = ["antigravity"]
 
 [[integrations]]
@@ -124,9 +125,10 @@ name = "Google Antigravity"
 description = "Connect a Google Antigravity account and use the v1internal model API."
 provider_adapter = "antigravity"
 credential_strategy = "antigravity-oauth"
+auth_flow = "antigravity"
 
 [permissions]
-network_hosts = ["oauth2.googleapis.com"]
+network_hosts = ["accounts.google.com", "oauth2.googleapis.com", "www.googleapis.com"]
 credential_scopes = ["provider:antigravity"]
 credential_read = true
 
@@ -144,7 +146,7 @@ An optional `[[integrations]]` entry groups low-level capabilities into a
 user-facing integration. It is declarative metadata only: it executes no
 dashboard code and grants no additional authority.
 
-Every referenced `provider_adapter`, `credential_strategy`, or
+Every referenced `provider_adapter`, `credential_strategy`, `auth_flow`, or
 `model_source` must be declared by the same plugin in `[provides]`. Kinetix
 rejects duplicate integration IDs, empty integrations, and references to
 undeclared capabilities during installation.
