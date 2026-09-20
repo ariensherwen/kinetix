@@ -360,6 +360,26 @@ packages.
 Do not set an entry `installable = true` until the signed release asset exists
 and its exact SHA-256 and redirect hosts have been committed to the catalog.
 
+### Install and update preview
+
+For an install-ready catalog entry, the dashboard performs a verified preview
+before allowing installation. The preview downloads the exact release artifact
+and applies the same distribution trust checks as installation:
+
+- HTTPS and per-hop redirect-host allow-list;
+- package size bound;
+- exact catalog SHA-256;
+- manifest id and version match;
+- Ed25519 signature from the separately trusted publisher key.
+
+Kinetix then compares the target manifest with the currently active manifest
+(or an empty permission set for a first install) and shows semantic changes to
+`network_hosts`, `credential_scopes`, and `credential_read`.
+
+Confirmation does not reuse the preview as an authorization token. Kinetix
+downloads and verifies the artifact again before installation, then installs it
+disabled with permission grants cleared.
+
 ## Version history and rollback
 
 Kinetix retains accepted package bytes independently from the active plugin row.
