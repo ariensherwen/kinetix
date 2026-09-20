@@ -61,6 +61,7 @@ mod tests {
             WireFormat::Anthropic
         ));
         assert!(!is_passthrough(FrontendFormat::OpenAi, WireFormat::Gemini));
+        assert!(!is_passthrough(FrontendFormat::OpenAi, WireFormat::Plugin));
         assert!(!is_passthrough(
             FrontendFormat::OpenAiResponses,
             WireFormat::Openai
