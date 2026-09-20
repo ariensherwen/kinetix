@@ -18,7 +18,7 @@ use crate::db::Pool;
 use super::manifest::{self, HostPolicy};
 use super::package::{self, Package, SignatureStatus};
 use super::runtime::{
-    bindings, wit, DeadlineGuard, HostBacking, HostCtx, PluginFault, PluginRuntime,
+    bindings, wit, DeadlineGuard, HostBacking, HostCtx, PluginFault, PluginRuntime, CONFIG_PREFIX,
 };
 use super::store::{self, PermissionGrant, PluginRow};
 use super::types::{Capability, CircuitState, Limits, Manifest, Provided};
@@ -334,6 +334,130 @@ impl PluginManager {
 
     pub async fn get(&self, id: &str) -> Result<Option<PluginRow>> {
         store::get_plugin(&self.inner.pool, id).await
+    }
+
+    /// Return host-owned dashboard settings without revealing secret values.
+    pub async fn ui_settings(&self, id: &str) -> Result<serde_json::Value> {
+        let row = self
+            .get(id)
+            .await?
+            .ok_or_else(|| anyhow!("plugin '{id}' is not installed"))?;
+        let manifest = row
+            .manifest()
+            .ok_or_else(|| anyhow!("plugin '{id}' has an unreadable manifest"))?;
+
+        let mut fields = Vec::new();
+        for setting in &manifest.ui.settings {
+            let storage_key = format!("{CONFIG_PREFIX}{}", setting.key);
+            let stored = store::kv_get(
+                &self.inner.pool,
+                &self.inner.crypto,
+                id,
+                &storage_key,
+            )
+            .await?;
+            let configured = stored.is_some();
+            let value = if setting.kind == "secret" {
+                serde_json::Value::Null
+            } else if let Some(bytes) = stored {
+                let text = String::from_utf8(bytes)
+                    .map_err(|_| anyhow!("stored setting '{}' is not utf-8", setting.key))?;
+                if setting.kind == "boolean" {
+                    serde_json::Value::Bool(text == "true")
+                } else {
+                    serde_json::Value::String(text)
+                }
+            } else if let Some(default) = &setting.default {
+                if setting.kind == "boolean" {
+                    serde_json::Value::Bool(default == "true")
+                } else {
+                    serde_json::Value::String(default.clone())
+                }
+            } else {
+                serde_json::Value::Null
+            };
+
+            fields.push(serde_json::json!({
+                "key": setting.key,
+                "label": setting.label,
+                "kind": setting.kind,
+                "description": setting.description,
+                "required": setting.required,
+                "options": setting.options,
+                "configured": configured,
+                "value": value,
+            }));
+        }
+
+        Ok(serde_json::json!({ "id": id, "settings": fields }))
+    }
+
+    /// Partially update host-owned plugin settings. Omitted keys are unchanged;
+    /// null deletes an optional value. Secret values are never echoed back.
+    pub async fn update_ui_settings(
+        &self,
+        id: &str,
+        values: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<serde_json::Value> {
+        let row = self
+            .get(id)
+            .await?
+            .ok_or_else(|| anyhow!("plugin '{id}' is not installed"))?;
+        let manifest = row
+            .manifest()
+            .ok_or_else(|| anyhow!("plugin '{id}' has an unreadable manifest"))?;
+
+        for (key, value) in values {
+            let setting = manifest
+                .ui
+                .settings
+                .iter()
+                .find(|setting| setting.key == *key)
+                .ok_or_else(|| anyhow!("unknown plugin setting '{key}'"))?;
+            let storage_key = format!("{CONFIG_PREFIX}{key}");
+
+            if value.is_null() {
+                if setting.required {
+                    bail!("required plugin setting '{key}' cannot be cleared");
+                }
+                store::kv_delete(&self.inner.pool, id, &storage_key).await?;
+                continue;
+            }
+
+            let encoded = match setting.kind.as_str() {
+                "boolean" => value
+                    .as_bool()
+                    .ok_or_else(|| anyhow!("plugin setting '{key}' must be boolean"))?
+                    .to_string(),
+                "text" | "secret" | "select" => {
+                    let text = value
+                        .as_str()
+                        .ok_or_else(|| anyhow!("plugin setting '{key}' must be a string"))?;
+                    if setting.required && text.trim().is_empty() {
+                        bail!("required plugin setting '{key}' must not be empty");
+                    }
+                    if setting.kind == "select" && !setting.options.iter().any(|v| v == text) {
+                        bail!("plugin setting '{key}' has an unsupported option");
+                    }
+                    text.to_string()
+                }
+                other => bail!("unsupported plugin setting kind '{other}'"),
+            };
+
+            if encoded.len() > 64 * 1024 {
+                bail!("plugin setting '{key}' exceeds 64 KiB");
+            }
+            store::kv_put(
+                &self.inner.pool,
+                &self.inner.crypto,
+                id,
+                &storage_key,
+                encoded.as_bytes(),
+            )
+            .await?;
+        }
+
+        self.ui_settings(id).await
     }
 
     /// Explicitly approve the plugin's currently declared permission set.
