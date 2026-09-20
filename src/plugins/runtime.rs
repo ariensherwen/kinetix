@@ -868,6 +868,73 @@ mod tests {
         }
     }
 
+    #[test]
+    fn blocked_ip_policy_covers_private_metadata_and_special_ranges() {
+        for ip in [
+            "127.0.0.1",
+            "10.0.0.1",
+            "100.64.0.1",
+            "169.254.169.254",
+            "192.0.0.1",
+            "198.18.0.1",
+            "224.0.0.1",
+            "::1",
+            "fd00::1",
+            "fe80::1",
+            "::ffff:127.0.0.1",
+        ] {
+            assert!(
+                crate::admin::is_blocked_ip(ip.parse().unwrap()),
+                "{ip} must be blocked"
+            );
+        }
+        for ip in ["8.8.8.8", "1.1.1.1", "2606:4700:4700::1111"] {
+            assert!(
+                !crate::admin::is_blocked_ip(ip.parse().unwrap()),
+                "{ip} must remain public"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn buffered_http_rejects_allowlisted_private_ip_before_connect() {
+        use bindings::kinetix::plugin::host_http::Host;
+
+        let req = wit::types::HttpRequest {
+            method: "GET".into(),
+            url: "https://127.0.0.1/".into(),
+            headers: vec![],
+            body: vec![],
+            credential: None,
+        };
+
+        let mut ctx = test_ctx(true, vec!["127.0.0.1".into()]);
+        let err = ctx.send(req).await.unwrap().unwrap_err();
+        assert_eq!(err.code, "permission_denied");
+        assert!(err.message.contains("blocked"), "{}", err.message);
+        assert_eq!(ctx.outbound_count, 0);
+    }
+
+    #[tokio::test]
+    async fn buffered_http_rejects_host_and_hop_by_hop_headers_before_send() {
+        use bindings::kinetix::plugin::host_http::Host;
+
+        for header in ["Host", "Connection", "Proxy-Authorization", "Content-Length"] {
+            let req = wit::types::HttpRequest {
+                method: "GET".into(),
+                url: "https://8.8.8.8/".into(),
+                headers: vec![(header.into(), "x".into())],
+                body: vec![],
+                credential: None,
+            };
+            let mut ctx = test_ctx(true, vec!["8.8.8.8".into()]);
+            let err = ctx.send(req).await.unwrap().unwrap_err();
+            assert_eq!(err.code, "invalid_configuration");
+            assert!(err.message.contains("not permitted"), "{}", err.message);
+            assert_eq!(ctx.outbound_count, 0);
+        }
+    }
+
     #[tokio::test]
     async fn buffered_http_is_scoped_to_the_current_capability() {
         use bindings::kinetix::plugin::host_http::Host;
