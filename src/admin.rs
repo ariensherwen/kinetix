@@ -2929,14 +2929,34 @@ fn is_blocked_host(host: &str) -> bool {
 pub fn is_blocked_ip(ip: std::net::IpAddr) -> bool {
     match ip {
         std::net::IpAddr::V4(v4) => {
+            let octets = v4.octets();
+            let shared_address_space =
+                octets[0] == 100 && (64..=127).contains(&octets[1]);
+            let benchmarking =
+                octets[0] == 198 && matches!(octets[1], 18 | 19);
             v4.is_loopback()
                 || v4.is_private()
                 || v4.is_link_local()
                 || v4.is_unspecified()
                 || v4.is_broadcast()
-                || v4.octets()[0] == 169 && v4.octets()[1] == 254
+                || v4.is_multicast()
+                || octets[0] == 0
+                || shared_address_space
+                || benchmarking
         }
-        std::net::IpAddr::V6(v6) => v6.is_loopback() || v6.is_unspecified(),
+        std::net::IpAddr::V6(v6) => {
+            if let Some(mapped) = v6.to_ipv4_mapped() {
+                return is_blocked_ip(std::net::IpAddr::V4(mapped));
+            }
+            let first = v6.segments()[0];
+            let unique_local = first & 0xfe00 == 0xfc00;
+            let link_local = first & 0xffc0 == 0xfe80;
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_multicast()
+                || unique_local
+                || link_local
+        }
     }
 }
 
