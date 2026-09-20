@@ -117,6 +117,7 @@ version = "0.1.0"
 [provides]
 credential_strategies = ["antigravity-oauth"]
 auth_flows = ["antigravity"]
+account_model_sources = ["antigravity-models"]
 provider_adapters = ["antigravity"]
 
 [[integrations]]
@@ -126,6 +127,7 @@ description = "Connect a Google Antigravity account and use the v1internal model
 provider_adapter = "antigravity"
 credential_strategy = "antigravity-oauth"
 auth_flow = "antigravity"
+model_source = "antigravity-models"
 
 [integrations.provider]
 base_url = "https://autopush-alkalimakersuite-pa.sandbox.googleapis.com"
@@ -136,7 +138,7 @@ capability_mode = "permissive"
 follow_redirects = false
 
 [permissions]
-network_hosts = ["accounts.google.com", "oauth2.googleapis.com", "www.googleapis.com"]
+network_hosts = ["accounts.google.com", "oauth2.googleapis.com", "www.googleapis.com", "daily-cloudcode-pa.sandbox.googleapis.com"]
 credential_scopes = ["credential_strategy:antigravity-oauth"]
 credential_read = true
 
@@ -198,6 +200,30 @@ capability-binding checks. The host derives `wire_plugin`,
 `credential_plugin`, and `model_source_plugin` from the parent Integration;
 the package cannot inject bindings to another plugin. Repeating setup returns
 the existing matching provider instead of creating a duplicate.
+
+### Account-aware model discovery
+
+Legacy `model_sources` keep the original API-v1 discovery contract and receive
+provider/base/path metadata only. They remain fully compatible.
+
+Plugins that need an authenticated provider account declare
+`account_model_sources` instead:
+
+```toml
+[provides]
+account_model_sources = ["antigravity-models"]
+```
+
+Kinetix invokes these through the separate optional `plugin-model-source`
+world and supplies an explicit `account-ref { provider-id, account-id }`.
+Credential access still passes through the plugin's approved
+`credential_scopes` and `credential_read` policy. A provider binding keeps
+the same `plugin:<id>/<name>` syntax; the host resolves account-aware discovery
+first and falls back to legacy `model_sources`.
+
+After a browser AuthFlow succeeds, Kinetix may return the non-secret provider
+id to the dashboard so it can immediately run discovery. Authorization codes,
+access tokens, refresh tokens, and account secrets never appear in that URL.
 
 ### Native dashboard actions
 
