@@ -699,7 +699,24 @@ fn default_permissive() -> String {
 async fn provider_plugin_binding_problems(state: &AppState, body: &ProviderBody) -> Vec<String> {
     use crate::plugins::Capability;
 
-    let bindings = [
+    let mut problems = Vec::new();
+    let Some(manager) = state.plugin_manager() else {
+        for (field, reference) in [
+            ("wire_plugin", body.wire_plugin.as_str()),
+            ("credential_plugin", body.credential_plugin.as_str()),
+            ("model_source_plugin", body.model_source_plugin.as_str()),
+        ] {
+            if !reference.trim().is_empty() {
+                problems.push(format!(
+                    "{field} references '{}' but the plugin host is unavailable",
+                    reference.trim()
+                ));
+            }
+        }
+        return problems;
+    };
+
+    for (field, reference, capability) in [
         (
             "wire_plugin",
             body.wire_plugin.as_str(),
@@ -710,15 +727,7 @@ async fn provider_plugin_binding_problems(state: &AppState, body: &ProviderBody)
             body.credential_plugin.as_str(),
             Capability::CredentialStrategy,
         ),
-        (
-            "model_source_plugin",
-            body.model_source_plugin.as_str(),
-            Capability::ModelSource,
-        ),
-    ];
-
-    let mut problems = Vec::new();
-    for (field, reference, capability) in bindings {
+    ] {
         let reference = reference.trim();
         if reference.is_empty() {
             continue;
@@ -729,23 +738,37 @@ async fn provider_plugin_binding_problems(state: &AppState, body: &ProviderBody)
             ));
             continue;
         }
-        let Some(manager) = state.plugin_manager() else {
-            problems.push(format!(
-                "{field} references '{reference}' but the plugin host is unavailable"
-            ));
-            continue;
-        };
-        if manager
-            .resolve_binding(reference, capability)
-            .await
-            .is_none()
-        {
+        if manager.resolve_binding(reference, capability).await.is_none() {
             problems.push(format!(
                 "{field} reference '{reference}' does not resolve to an installed, enabled, approved plugin providing {}",
                 capability.manifest_key()
             ));
         }
     }
+
+    let model_reference = body.model_source_plugin.trim();
+    if !model_reference.is_empty() {
+        if crate::plugins::PluginRef::parse(model_reference).is_none() {
+            problems.push(
+                "model_source_plugin must use plugin:<id>/<capability-name> syntax".into(),
+            );
+        } else {
+            let v2 = manager
+                .resolve_binding(model_reference, Capability::ModelSourceV2)
+                .await
+                .is_some();
+            let v1 = manager
+                .resolve_binding(model_reference, Capability::ModelSource)
+                .await
+                .is_some();
+            if !v1 && !v2 {
+                problems.push(format!(
+                    "model_source_plugin reference '{model_reference}' does not resolve to an installed, enabled, approved plugin providing model_sources or model_sources_v2"
+                ));
+            }
+        }
+    }
+
     problems
 }
 
@@ -954,38 +977,79 @@ pub async fn discover_models(
         if let Some(pref) = provider.model_source_plugin_ref() {
             let manager = plugin_manager(&state)?;
             let reference = format!("plugin:{}/{}", pref.plugin_id, pref.capability);
-            if manager
+            let is_v2 = manager
+                .resolve_binding(&reference, crate::plugins::Capability::ModelSourceV2)
+                .await
+                .is_some();
+            let is_v1 = manager
                 .resolve_binding(&reference, crate::plugins::Capability::ModelSource)
                 .await
-                .is_none()
-            {
+                .is_some();
+            if !is_v1 && !is_v2 {
                 return Err(ApiError::bad(format!(
                     "provider is bound to unavailable plugin model source '{reference}'"
                 )));
             }
             let models_path = provider.models_path.clone().unwrap_or_default();
-            let list = manager
-                .model_discover(
-                    &pref.plugin_id,
-                    &provider.id,
-                    &provider.base_url,
-                    &models_path,
-                )
-                .await
-                .map_err(|f| {
-                    ApiError::bad(format!(
-                        "plugin model discovery failed: {}",
-                        crate::crypto::redact(&f.message())
-                    ))
-                })?;
-            list.into_iter()
-                .map(|m| crate::adapters::DiscoveredModel {
-                    id: m.id,
-                    display_name: m.display_name,
-                    context_window: m.context_window.map(|v| v as i64),
-                    max_output_tokens: m.max_output_tokens.map(|v| v as i64),
-                })
-                .collect()
+            if is_v2 {
+                let account = db::accounts_for_provider(&state.pool, &provider.id)
+                    .await
+                    .map_err(ApiError::internal)?
+                    .into_iter()
+                    .find(|account| account.status != "disabled")
+                    .ok_or_else(|| {
+                        ApiError::bad(
+                            "provider has no enabled account for credential-aware model discovery",
+                        )
+                    })?;
+                let list = manager
+                    .model_discover_v2(
+                        &pref.plugin_id,
+                        &pref.capability,
+                        &provider.id,
+                        &account.id,
+                        &provider.base_url,
+                        &models_path,
+                    )
+                    .await
+                    .map_err(|f| {
+                        ApiError::bad(format!(
+                            "plugin model discovery failed: {}",
+                            crate::crypto::redact(&f.message())
+                        ))
+                    })?;
+                list.into_iter()
+                    .map(|m| crate::adapters::DiscoveredModel {
+                        id: m.id,
+                        display_name: m.display_name,
+                        context_window: m.context_window.map(|v| v as i64),
+                        max_output_tokens: m.max_output_tokens.map(|v| v as i64),
+                    })
+                    .collect()
+            } else {
+                let list = manager
+                    .model_discover(
+                        &pref.plugin_id,
+                        &provider.id,
+                        &provider.base_url,
+                        &models_path,
+                    )
+                    .await
+                    .map_err(|f| {
+                        ApiError::bad(format!(
+                            "plugin model discovery failed: {}",
+                            crate::crypto::redact(&f.message())
+                        ))
+                    })?;
+                list.into_iter()
+                    .map(|m| crate::adapters::DiscoveredModel {
+                        id: m.id,
+                        display_name: m.display_name,
+                        context_window: m.context_window.map(|v| v as i64),
+                        max_output_tokens: m.max_output_tokens.map(|v| v as i64),
+                    })
+                    .collect()
+            }
         } else {
             discover_models_native(&state, &provider).await?
         };
@@ -3967,21 +4031,26 @@ pub async fn setup_plugin_integration_provider(
         .as_deref()
         .map(|name| format!("plugin:{id}/{name}"))
         .unwrap_or_default();
-    let model_source_plugin = integration
-        .model_source
-        .as_deref()
-        .map(|name| format!("plugin:{id}/{name}"))
-        .unwrap_or_default();
+    let (model_source_plugin, model_source_capability) =
+        if let Some(name) = integration.model_source_v2.as_deref() {
+            (
+                format!("plugin:{id}/{name}"),
+                Some(crate::plugins::Capability::ModelSourceV2),
+            )
+        } else if let Some(name) = integration.model_source.as_deref() {
+            (
+                format!("plugin:{id}/{name}"),
+                Some(crate::plugins::Capability::ModelSource),
+            )
+        } else {
+            (String::new(), None)
+        };
 
     for (reference, capability) in [
         (&wire_plugin, crate::plugins::Capability::ProviderAdapter),
         (
             &credential_plugin,
             crate::plugins::Capability::CredentialStrategy,
-        ),
-        (
-            &model_source_plugin,
-            crate::plugins::Capability::ModelSource,
         ),
     ] {
         if !reference.is_empty()
@@ -3992,6 +4061,17 @@ pub async fn setup_plugin_integration_provider(
         {
             return Err(ApiError::bad(format!(
                 "integration capability binding '{reference}' is not enabled and approved"
+            )));
+        }
+    }
+    if let Some(capability) = model_source_capability {
+        if manager
+            .resolve_binding(&model_source_plugin, capability)
+            .await
+            .is_none()
+        {
+            return Err(ApiError::bad(format!(
+                "integration capability binding '{model_source_plugin}' is not enabled and approved"
             )));
         }
     }
