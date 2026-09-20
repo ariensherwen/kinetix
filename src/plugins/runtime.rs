@@ -199,11 +199,7 @@ pub trait HostBacking: Send + Sync {
     /// Resolve the highest-priority non-disabled account secret for a provider.
     /// This backs the narrow `provider-default:<provider-id>` named credential
     /// used by account-agnostic control-plane capabilities such as model discovery.
-    async fn resolve_default_secret(
-        &self,
-        plugin_id: &str,
-        provider_id: &str,
-    ) -> Result<String>;
+    async fn resolve_default_secret(&self, plugin_id: &str, provider_id: &str) -> Result<String>;
 }
 
 /// A configured Wasmtime host runtime shared by every plugin instance.
@@ -547,9 +543,7 @@ impl HostCtx {
         {
             return Err(format!("plugin is not scoped to provider '{provider_id}'"));
         }
-        let secret = self
-            .read_credential_secret(cred)
-            .await?;
+        let secret = self.read_credential_secret(cred).await?;
         Ok(Some((
             "authorization".to_string(),
             format!("Bearer {secret}"),
