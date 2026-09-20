@@ -151,6 +151,28 @@ Every referenced `provider_adapter`, `credential_strategy`, `auth_flow`, or
 rejects duplicate integration IDs, empty integrations, and references to
 undeclared capabilities during installation.
 
+### Native dashboard actions
+
+Plugins may optionally declare `[[ui.actions]]` records. These are
+host-rendered controls, not plugin JavaScript. Kinetix validates each action at
+install time and the dashboard maps it to an operation already implemented and
+authorized by Kinetix core.
+
+The first supported kind is `auth`:
+
+```toml
+[[ui.actions]]
+id = "connect-account"
+label = "Connect account"
+kind = "auth"
+integration = "antigravity"
+description = "Sign in and add an account to a compatible provider."
+```
+
+An `auth` action must reference an integration that declares both
+`auth_flow` and `credential_strategy`. The browser never executes guest code
+and never receives the credential returned by the authorization exchange.
+
 ---
 
 ## Developing Plugins
