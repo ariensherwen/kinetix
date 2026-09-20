@@ -837,7 +837,22 @@ capacity.
 This keeps the configured quota stable regardless of encryption/base64
 overhead and closes cache/config bypasses.
 
-### 14.0.2 Compiled component cache
+### 14.0.2 Invocation concurrency isolation
+
+Guest execution uses two host-owned semaphore layers:
+
+- **4 concurrent invocations per plugin**;
+- **16 concurrent plugin invocations globally**.
+
+The per-plugin permit is acquired first. A plugin that has saturated its own
+four slots therefore waits without reserving a global slot that another plugin
+could use. This prevents one noisy or slow guest from monopolizing every
+Wasmtime execution slot while preserving a hard process-wide concurrency cap.
+
+The limits are host policy, not plugin-grantable authority. Removing a plugin
+also drops its cached per-plugin semaphore entry.
+
+### 14.0.3 Compiled component cache
 
 Wasmtime compilation is package-code work, not invocation authority. Kinetix
 therefore caches one immutable compiled `Component` per installed plugin,
@@ -856,21 +871,6 @@ The cache deliberately stops at the compiled component boundary:
 This removes repeated Wasmtime compilation from request/control-plane
 invocations without retaining stale runtime authority. Global plugin metrics
 expose `component_cache_hits` and `component_cache_misses`.
-
-### 14.0.3 Invocation concurrency isolation
-
-Guest execution uses two host-owned semaphore layers:
-
-- **4 concurrent invocations per plugin**;
-- **16 concurrent plugin invocations globally**.
-
-The per-plugin permit is acquired first. A plugin that has saturated its own
-four slots therefore waits without reserving a global slot that another plugin
-could use. This prevents one noisy or slow guest from monopolizing every
-Wasmtime execution slot while preserving a hard process-wide concurrency cap.
-
-The limits are host policy, not plugin-grantable authority. Removing a plugin
-also drops its cached per-plugin semaphore entry.
 
 ## 14.1 Catalog distribution and publisher trust
 
