@@ -167,6 +167,27 @@ pub struct Integration {
     pub model_source: Option<String>,
 }
 
+/// A native dashboard action declared by a plugin. Actions are metadata only:
+/// the dashboard renders host-owned controls and invokes an already-authorized
+/// Kinetix operation. No plugin JavaScript is loaded into the admin origin.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiAction {
+    pub id: String,
+    pub label: String,
+    /// v1 supports `auth`; future kinds can be added without exposing JS.
+    pub kind: String,
+    pub integration: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+/// Declarative dashboard metadata. Empty by default for backward compatibility.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PluginUi {
+    #[serde(default)]
+    pub actions: Vec<UiAction>,
+}
+
 /// A parsed `plugin.toml` (§5).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
@@ -179,6 +200,8 @@ pub struct Manifest {
     pub provides: Provides,
     #[serde(default)]
     pub integrations: Vec<Integration>,
+    #[serde(default)]
+    pub ui: PluginUi,
     #[serde(default)]
     pub permissions: Permissions,
     #[serde(default)]
