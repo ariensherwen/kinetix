@@ -1536,18 +1536,18 @@ impl PluginManager {
 
     /// Refresh the complete cached routing-fact snapshot off the request path.
     ///
-    /// Cached mode may use approved buffered HTTP here. The returned fact list
-    /// is validated, host-stamped, and atomically replaces the previous
-    /// `_cache:` snapshot so removed facts cannot linger.
+    /// Cached mode may use approved buffered HTTP here. Facts returned from the
+    /// guest and facts published through `cache_set` are merged into one
+    /// validated, host-stamped snapshot and committed atomically.
     pub async fn refresh_cached_routing_facts(&self, id: &str) -> Result<usize, PluginFault> {
         let row = self
             .get(id)
             .await
             .map_err(|e| PluginFault::Internal(e.to_string()))?
             .ok_or_else(|| PluginFault::Internal(format!("plugin '{id}' is not installed")))?;
-        let manifest = row
-            .manifest()
-            .ok_or_else(|| PluginFault::Internal(format!("plugin '{id}' has an unreadable manifest")))?;
+        let manifest = row.manifest().ok_or_else(|| {
+            PluginFault::Internal(format!("plugin '{id}' has an unreadable manifest"))
+        })?;
         if manifest.routing_facts_mode != "cached" || manifest.provides.routing_facts.is_empty() {
             return Err(PluginFault::InvalidResult(
                 "cached routing-fact refresh requested for a plugin that does not declare cached routing facts"
@@ -1565,125 +1565,35 @@ impl PluginManager {
             .map_err(|e| PluginFault::Internal(e.to_string()))?;
         let plugin = p.plugin;
         let rt = self.inner.runtime.clone();
-        let _guard = rt.arm_deadline(&mut p.store, p.wall_time);
+        let guard = rt.arm_deadline(&mut p.store, p.wall_time);
         let call = plugin
             .routing_facts()
-            .call_facts(
-                &mut p.store,
-                r#"{"kind":"background_refresh"}"#,
-            )
+            .call_facts(&mut p.store, r#"{"kind":"background_refresh"}"#)
             .await
             .map_err(map_call_error)
             .and_then(map_plugin_result);
+        let pending = std::mem::take(&mut p.store.data_mut().pending_cache);
+        drop(guard);
 
         let result = match call {
             Ok(facts) => {
-                let now = crate::db::now_iso();
-                let mut names = std::collections::HashSet::new();
-                let mut snapshot = Vec::with_capacity(facts.len());
-
-                for fact in facts {
-                    if fact.name.is_empty()
-                        || fact.name.len() > 128
-                        || !fact.name.chars().all(|c| {
-                            c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_')
-                        })
+                match build_cached_fact_snapshot(facts, pending, &crate::db::now_iso()) {
+                    Ok(snapshot) => match store::kv_replace_prefix_limited(
+                        &self.inner.pool,
+                        &self.inner.crypto,
+                        id,
+                        super::runtime::CACHE_PREFIX,
+                        &snapshot,
+                        limits.storage,
+                    )
+                    .await
                     {
-                        return self
-                            .settle(
-                                id,
-                                "routing_facts.refresh",
-                                started,
-                                Err(PluginFault::InvalidResult(format!(
-                                    "invalid cached routing fact name '{}'",
-                                    fact.name
-                                ))),
-                            )
-                            .await;
-                    }
-                    if !names.insert(fact.name.clone()) {
-                        return self
-                            .settle(
-                                id,
-                                "routing_facts.refresh",
-                                started,
-                                Err(PluginFault::InvalidResult(format!(
-                                    "duplicate cached routing fact '{}'",
-                                    fact.name
-                                ))),
-                            )
-                            .await;
-                    }
-
-                    let value: serde_json::Value = match serde_json::from_str(&fact.value_json) {
-                        Ok(value) => value,
-                        Err(error) => {
-                            return self
-                                .settle(
-                                    id,
-                                    "routing_facts.refresh",
-                                    started,
-                                    Err(PluginFault::InvalidResult(format!(
-                                        "cached routing fact '{}' has invalid JSON: {error}",
-                                        fact.name
-                                    ))),
-                                )
-                                .await;
-                        }
-                    };
-                    let Some(max_age_ms) = fact.max_age_ms else {
-                        return self
-                            .settle(
-                                id,
-                                "routing_facts.refresh",
-                                started,
-                                Err(PluginFault::InvalidResult(format!(
-                                    "cached routing fact '{}' must declare max_age_ms",
-                                    fact.name
-                                ))),
-                            )
-                            .await;
-                    };
-                    if max_age_ms == 0 || max_age_ms > 24 * 60 * 60 * 1000 {
-                        return self
-                            .settle(
-                                id,
-                                "routing_facts.refresh",
-                                started,
-                                Err(PluginFault::InvalidResult(format!(
-                                    "cached routing fact '{}' max_age_ms is out of range",
-                                    fact.name
-                                ))),
-                            )
-                            .await;
-                    }
-
-                    let envelope = serde_json::json!({
-                        "value": value,
-                        "observed_at": now,
-                        "max_age_ms": max_age_ms,
-                    })
-                    .to_string();
-                    snapshot.push((
-                        format!("{}{}", super::runtime::CACHE_PREFIX, fact.name),
-                        envelope.into_bytes(),
-                    ));
-                }
-
-                match store::kv_replace_prefix_limited(
-                    &self.inner.pool,
-                    &self.inner.crypto,
-                    id,
-                    super::runtime::CACHE_PREFIX,
-                    &snapshot,
-                    limits.storage,
-                )
-                .await
-                {
-                    Ok(()) => Ok(snapshot.len()),
-                    Err(error) => Err(PluginFault::Internal(format!(
-                        "persisting cached routing fact snapshot: {error}"
-                    ))),
+                        Ok(()) => Ok(snapshot.len()),
+                        Err(error) => Err(PluginFault::Internal(format!(
+                            "persisting cached routing fact snapshot: {error}"
+                        ))),
+                    },
+                    Err(fault) => Err(fault),
                 }
             }
             Err(fault) => Err(fault),
@@ -1853,6 +1763,69 @@ impl PluginManager {
             }
         }
     }
+}
+
+fn build_cached_fact_snapshot(
+    facts: Vec<wit::types::RoutingFact>,
+    pending: std::collections::BTreeMap<String, (String, u64)>,
+    observed_at: &str,
+) -> Result<Vec<(String, Vec<u8>)>, PluginFault> {
+    let mut names = std::collections::HashSet::new();
+    let mut snapshot = Vec::with_capacity(facts.len() + pending.len());
+
+    let mut add = |name: String, value_json: String, max_age_ms: u64| -> Result<(), PluginFault> {
+        if name.is_empty()
+            || name.len() > 128
+            || !name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+        {
+            return Err(PluginFault::InvalidResult(format!(
+                "invalid cached routing fact name '{name}'"
+            )));
+        }
+        if !names.insert(name.clone()) {
+            return Err(PluginFault::InvalidResult(format!(
+                "duplicate cached routing fact '{name}'"
+            )));
+        }
+        let value: serde_json::Value = serde_json::from_str(&value_json).map_err(|error| {
+            PluginFault::InvalidResult(format!(
+                "cached routing fact '{name}' has invalid JSON: {error}"
+            ))
+        })?;
+        if max_age_ms == 0 || max_age_ms > 24 * 60 * 60 * 1000 {
+            return Err(PluginFault::InvalidResult(format!(
+                "cached routing fact '{name}' max_age_ms is out of range"
+            )));
+        }
+        let envelope = serde_json::json!({
+            "value": value,
+            "observed_at": observed_at,
+            "max_age_ms": max_age_ms,
+        })
+        .to_string();
+        snapshot.push((
+            format!("{}{}", super::runtime::CACHE_PREFIX, name),
+            envelope.into_bytes(),
+        ));
+        Ok(())
+    };
+
+    for fact in facts {
+        let max_age_ms = fact.max_age_ms.ok_or_else(|| {
+            PluginFault::InvalidResult(format!(
+                "cached routing fact '{}' must declare max_age_ms",
+                fact.name
+            ))
+        })?;
+        add(fact.name, fact.value_json, max_age_ms)?;
+    }
+    for (name, (value_json, max_age_ms)) in pending {
+        add(name, value_json, max_age_ms)?;
+    }
+
+    Ok(snapshot)
 }
 
 /// Poll an external cancellation flag while a guest call runs and, once set,
