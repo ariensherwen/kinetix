@@ -869,6 +869,9 @@ mod tests {
         async fn resolve_secret(&self, _: &str, _: &str, _: &str) -> anyhow::Result<String> {
             Ok(String::new())
         }
+        async fn resolve_default_secret(&self, _: &str, _: &str) -> anyhow::Result<String> {
+            Ok(String::new())
+        }
     }
 
     #[test]
