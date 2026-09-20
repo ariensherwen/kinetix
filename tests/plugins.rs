@@ -111,6 +111,38 @@ async fn install_preserves_exact_package_and_provenance() {
 }
 
 #[tokio::test]
+async fn compiled_component_cache_warms_lazily_after_restart() {
+    let (m, pool) = manager().await;
+    let kxp = build_kxp(GOOD_MANIFEST, EMPTY_COMPONENT);
+    m.install(&kxp, None, &[], false).await.unwrap();
+
+    let restarted = PluginManager::new(
+        pool,
+        Arc::new(Crypto::new(&[9u8; 32])),
+        HostPolicy::default(),
+        m.package_root().to_path_buf(),
+    )
+    .unwrap();
+
+    let before = restarted.counters();
+    assert_eq!(before.component_cache_hits, 0);
+    assert_eq!(before.component_cache_misses, 0);
+
+    // The test component intentionally lacks the complete guest world, so
+    // validation fails at instantiation after compilation. The compiled code
+    // must still remain reusable for the next attempt.
+    assert!(restarted.validate("dev.example.foo").await.is_err());
+    let after_first = restarted.counters();
+    assert_eq!(after_first.component_cache_hits, 0);
+    assert_eq!(after_first.component_cache_misses, 1);
+
+    assert!(restarted.validate("dev.example.foo").await.is_err());
+    let after_second = restarted.counters();
+    assert_eq!(after_second.component_cache_hits, 1);
+    assert_eq!(after_second.component_cache_misses, 1);
+}
+
+#[tokio::test]
 async fn hash_mismatch_is_rejected() {
     let (m, _pool) = manager().await;
     let kxp = build_kxp(GOOD_MANIFEST, EMPTY_COMPONENT);
