@@ -7,6 +7,7 @@
 //! move the commit point.
 
 pub mod adapter;
+pub mod catalog;
 pub mod credential;
 pub mod manager;
 pub mod manifest;
