@@ -1990,6 +1990,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn plugin_metrics_are_isolated_by_plugin_and_capability() {
+        let (manager, pool, dir) = concurrency_test_manager().await;
+
+        let a = metric_cell(&manager.inner.metrics, "plugin-a", "model_source");
+        a.invocations
+            .store(3, std::sync::atomic::Ordering::Relaxed);
+        a.successes
+            .store(2, std::sync::atomic::Ordering::Relaxed);
+        a.http_requests
+            .store(5, std::sync::atomic::Ordering::Relaxed);
+
+        let b = metric_cell(&manager.inner.metrics, "plugin-b", "health_probe");
+        b.invocations
+            .store(7, std::sync::atomic::Ordering::Relaxed);
+
+        let a_snapshot = manager.metrics_for_plugin("plugin-a");
+        assert_eq!(a_snapshot.totals.invocations, 3);
+        assert_eq!(a_snapshot.totals.successes, 2);
+        assert_eq!(a_snapshot.totals.http_requests, 5);
+        assert_eq!(a_snapshot.by_capability.len(), 1);
+        assert!(a_snapshot.by_capability.contains_key("model_source"));
+
+        let b_snapshot = manager.metrics_for_plugin("plugin-b");
+        assert_eq!(b_snapshot.totals.invocations, 7);
+        assert_eq!(b_snapshot.by_capability.len(), 1);
+        assert!(b_snapshot.by_capability.contains_key("health_probe"));
+
+        pool.close().await;
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
     async fn backing_allows_credentials_only_for_matching_strategy_binding() {
         let dir = std::env::temp_dir().join(format!(
             "kinetix-plugin-scope-test-{}",
@@ -2026,7 +2058,11 @@ mod tests {
         .await
         .unwrap();
 
-        let backing = Backing { pool, crypto };
+        let backing = Backing {
+            pool,
+            crypto,
+            metrics: Arc::new(PluginMetricRegistry::new()),
+        };
         assert!(backing
             .credential_scope_allows(
                 "dev.example.plugin",
@@ -2109,7 +2145,11 @@ mod tests {
         .await
         .unwrap();
 
-        let backing = Backing { pool, crypto };
+        let backing = Backing {
+            pool,
+            crypto,
+            metrics: Arc::new(PluginMetricRegistry::new()),
+        };
         let err = backing
             .resolve_secret("dev.example.plugin", &provider_a, &account_id)
             .await
