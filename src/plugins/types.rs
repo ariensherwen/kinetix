@@ -319,10 +319,7 @@ impl Provides {
         add(Capability::CredentialStrategy, &self.credential_strategies);
         add(Capability::AuthFlow, &self.auth_flows);
         add(Capability::ModelSource, &self.model_sources);
-        add(
-            Capability::AccountModelSource,
-            &self.account_model_sources,
-        );
+        add(Capability::AccountModelSource, &self.account_model_sources);
         add(Capability::ProviderAdapter, &self.provider_adapters);
         add(Capability::RoutingFacts, &self.routing_facts);
         add(Capability::HealthProbe, &self.health_probes);
