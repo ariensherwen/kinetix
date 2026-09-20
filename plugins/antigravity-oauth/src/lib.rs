@@ -368,6 +368,21 @@ impl auth_world::exports::auth_flow::Guest for Component {
     ) -> Result<String, AuthPluginError> {
         require_antigravity_flow(&flow_name)?;
 
+        // The bundled Antigravity OAuth client is a desktop/native client.
+        // Google permits it to use loopback redirects, not arbitrary hosted
+        // dashboard origins. A future declarative settings layer can support
+        // operator-provided web-client credentials for remote deployments.
+        let loopback = redirect_uri.starts_with("http://localhost:")
+            || redirect_uri.starts_with("http://127.0.0.1:")
+            || redirect_uri.starts_with("http://[::1]:");
+        if !loopback {
+            return Err(auth_error(
+                "invalid_configuration",
+                "the bundled Antigravity OAuth client requires a loopback KINETIX_PUBLIC_BASE_URL",
+                false,
+            ));
+        }
+
         let mut url = format!(
             "{AUTHORIZE_URL}?client_id={}&response_type=code&redirect_uri={}&scope={}&state={}&access_type=offline&prompt=consent",
             urlencode(&default_client_id()),
