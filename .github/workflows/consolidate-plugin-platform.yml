@@ -30,6 +30,104 @@ jobs:
             git cherry-pick --empty=drop -X theirs "$commit"
           done
 
+      - name: Integrate account-aware discovery with hardened runtime
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/plugins/manager.rs")
+          text = path.read_text()
+
+          def rewrite_region(text, start_marker, end_marker, replacements):
+              start = text.index(start_marker)
+              end = text.index(end_marker, start)
+              block = text[start:end]
+              for old, new in replacements:
+                  if old not in block:
+                      raise SystemExit(f"expected integration pattern missing in {start_marker!r}: {old!r}")
+                  block = block.replace(old, new, 1)
+              return text[:start] + block + text[end:]
+
+          text = rewrite_region(
+              text,
+              "    async fn prepare_model_source(",
+              "    /// Instantiate the optional account-authorization world",
+              [
+                  (
+                      "        let grants = self.ensure_permissions_approved(id, &manifest).await?;\n        let limits",
+                      "        let grants = self.ensure_permissions_approved(id, &manifest).await?;\n        self.ensure_circuit_ready(id).await?;\n        let limits",
+                  ),
+                  (
+                      "        let component = self.inner.runtime.compile(&row.component)?;",
+                      "        let component = self.compiled_component(&row)?;",
+                  ),
+                  (
+                      "        let mut store = self.new_store(&row, &limits, &grants, false, true);",
+                      '        let mut store = self.new_store(&row, &limits, &grants, false, true, "account_model_source");',
+                  ),
+                  (
+                      "            .instantiate_model_source(&linker, &mut store, &component)",
+                      "            .instantiate_model_source(&linker, &mut store, component.as_ref())",
+                  ),
+                  (
+                      "            .await?;\n        Ok(ModelSourcePrepared {",
+                      "            .await?;\n        self.claim_circuit_probe(id).await?;\n        Ok(ModelSourcePrepared {",
+                  ),
+              ],
+          )
+
+          text = rewrite_region(
+              text,
+              "    pub async fn account_model_discover(",
+              "    /// HealthProbe::probe",
+              [
+                  (
+                      "        self.bump_invocation();",
+                      '        let started = self.bump_invocation(id, "account_model_source");',
+                  ),
+                  (
+                      "        let _permit = self.inner.semaphore.acquire().await;",
+                      "        let _permits = self.acquire_invocation_permits(id).await;",
+                  ),
+                  (
+                      "        self.settle(id, result).await",
+                      '        self.settle(id, "account_model_source", started, result).await',
+                  ),
+              ],
+          )
+
+          text = rewrite_region(
+              text,
+              "    pub async fn validate(&self, id: &str)",
+              "    /// Resolve a `plugin:",
+              [
+                  (
+                      "            let mut model_store = self.new_store(&row, &limits, &[], false, false);",
+                      '            let mut model_store = self.new_store(&row, &limits, &[], false, false, "validation");',
+                  ),
+                  (
+                      "                .instantiate_model_source(&linker, &mut model_store, &component)",
+                      "                .instantiate_model_source(&linker, &mut model_store, component.as_ref())",
+                  ),
+              ],
+          )
+
+          test_ctor = """        let manager = PluginManager::new(
+              pool.clone(),
+              Arc::new(Crypto::new(&[29_u8; 32])),
+              HostPolicy::default(),"""
+          test_ctor_new = """        let manager = PluginManager::new(
+              pool.clone(),
+              Arc::new(Crypto::new(&[29_u8; 32])),
+              reqwest::Client::new(),
+              HostPolicy::default(),"""
+          if test_ctor not in text:
+              raise SystemExit("concurrency test PluginManager constructor pattern missing")
+          text = text.replace(test_ctor, test_ctor_new, 1)
+
+          path.write_text(text)
+          PY
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
