@@ -120,6 +120,31 @@ export const PluginsView: React.FC = () => {
   }, [loadDetail, selectedId]);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const authResult = params.get('plugin_auth');
+    if (authResult) {
+      const messages: Record<string, string> = {
+        success: 'Account connected successfully through the plugin authorization flow.',
+        cancelled: 'Account authorization was cancelled.',
+        error: 'Account authorization failed during the provider exchange.',
+        binding_changed:
+          'Account authorization was refused because the provider plugin binding changed during login.',
+      };
+      const message = messages[authResult] ?? 'Account authorization returned an unknown result.';
+      if (authResult === 'success') {
+        setNotice(message);
+      } else {
+        setError(message);
+      }
+      params.delete('plugin_auth');
+      const query = params.toString();
+      window.history.replaceState(
+        null,
+        '',
+        `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`,
+      );
+    }
+
     void refresh(null);
     // Initial load only; later refreshes are explicit so selecting an item does
     // not re-run this effect through the selectedId dependency.
