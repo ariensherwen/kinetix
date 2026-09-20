@@ -22,6 +22,12 @@ provider_adapter = "antigravity"
 credential_strategy = "antigravity-oauth"
 auth_flow = "antigravity"
 
+[[ui.settings]]
+key = "login_hint"
+label = "Google account hint"
+kind = "text"
+description = "Optional email address shown as Google's login hint during account authorization."
+
 [[ui.actions]]
 id = "connect-account"
 label = "Connect account"
