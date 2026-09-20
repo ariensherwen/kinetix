@@ -432,9 +432,7 @@ async fn resolve_plugin_destination(
         tokio::net::lookup_host((host, port))
             .await
             .map_err(|e| {
-                PluginEgressError::Unavailable(format!(
-                    "DNS resolution for '{host}' failed: {e}"
-                ))
+                PluginEgressError::Unavailable(format!("DNS resolution for '{host}' failed: {e}"))
             })?
             .collect::<Vec<_>>()
     };
@@ -566,12 +564,7 @@ impl bindings::kinetix::plugin::host_http::Host for HostCtx {
         // an unbounded resolver workload.
         self.outbound_count += 1;
         let port = parsed.port_or_known_default().unwrap_or(443);
-        let addrs = match resolve_plugin_destination(
-            &host,
-            port,
-            self.allow_private_network,
-        )
-        .await
+        let addrs = match resolve_plugin_destination(&host, port, self.allow_private_network).await
         {
             Ok(addrs) => addrs,
             Err(error) => return Ok(Err(error.into_plugin_error())),
@@ -619,12 +612,7 @@ impl bindings::kinetix::plugin::host_http::Host for HostCtx {
         let headers: Vec<(String, String)> = resp
             .headers()
             .iter()
-            .map(|(name, value)| {
-                (
-                    name.to_string(),
-                    value.to_str().unwrap_or("").to_string(),
-                )
-            })
+            .map(|(name, value)| (name.to_string(), value.to_str().unwrap_or("").to_string()))
             .collect();
         let (body, body_truncated) = read_bounded(resp, self.max_http_body).await;
         Ok(Ok(wit::types::HttpResponse {
@@ -967,22 +955,12 @@ mod tests {
             Err(PluginEgressError::Denied(_))
         ));
         assert!(matches!(
-            validate_plugin_destination_addrs(
-                "rebind.example",
-                vec![public, private],
-                false,
-            ),
+            validate_plugin_destination_addrs("rebind.example", vec![public, private], false,),
             Err(PluginEgressError::Denied(_))
         ));
 
-        let ula = SocketAddr::new(
-            IpAddr::V6("fd00::1".parse::<Ipv6Addr>().unwrap()),
-            443,
-        );
-        let link_local = SocketAddr::new(
-            IpAddr::V6("fe80::1".parse::<Ipv6Addr>().unwrap()),
-            443,
-        );
+        let ula = SocketAddr::new(IpAddr::V6("fd00::1".parse::<Ipv6Addr>().unwrap()), 443);
+        let link_local = SocketAddr::new(IpAddr::V6("fe80::1".parse::<Ipv6Addr>().unwrap()), 443);
         let mapped_loopback = SocketAddr::new(
             IpAddr::V6("::ffff:127.0.0.1".parse::<Ipv6Addr>().unwrap()),
             443,
@@ -994,12 +972,9 @@ mod tests {
             ));
         }
 
-        assert!(validate_plugin_destination_addrs(
-            "dev-private.example",
-            vec![private],
-            true,
-        )
-        .is_ok());
+        assert!(
+            validate_plugin_destination_addrs("dev-private.example", vec![private], true,).is_ok()
+        );
     }
 
     #[tokio::test]
