@@ -374,6 +374,22 @@ storage = "2MiB"
     }
 
     #[test]
+    fn rejects_integration_referencing_missing_auth_flow() {
+        let bad = GOOD
+            .replace(
+                "model_sources = [\"foo-models\"]",
+                "model_sources = [\"foo-models\"]\nauth_flows = [\"foo-login\"]",
+            )
+            .replace("model_source = \"foo-models\"", "auth_flow = \"missing-login\"");
+        let err = parse_and_validate(&bad, HostPolicy::default()).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("unknown auth_flow 'missing-login'"),
+            "{err}"
+        );
+    }
+
+    #[test]
     fn rejects_bad_wildcard() {
         let bad = GOOD.replace("\"*.svc.example\"", "\"api.*.example\"");
         assert!(parse_and_validate(&bad, HostPolicy::default()).is_err());
