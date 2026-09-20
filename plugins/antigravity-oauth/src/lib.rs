@@ -32,6 +32,14 @@ use kinetix_plugin_sdk::{export, exports, kinetix};
 const AUTHORIZE_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const USERINFO_URL: &str = "https://www.googleapis.com/oauth2/v1/userinfo";
+const LOAD_CODE_ASSIST_URL: &str =
+    "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist";
+const ONBOARD_USER_URL: &str =
+    "https://cloudcode-pa.googleapis.com/v1internal:onboardUser";
+const MODELS_URL: &str =
+    "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
+const ANTIGRAVITY_IDE_VERSION: &str = "2.11.0";
+const ANTIGRAVITY_USER_AGENT: &str = "antigravity/ide/2.11.0 darwin/arm64";
 const ANTIGRAVITY_SCOPES: &[&str] = &[
     "https://www.googleapis.com/auth/cloud-platform",
     "https://www.googleapis.com/auth/userinfo.email",
@@ -78,6 +86,55 @@ struct Credential {
     project_id: Option<String>,
     #[serde(default)]
     email: Option<String>,
+}
+
+fn decode_credential(raw: &str) -> Credential {
+    serde_json::from_str(raw).unwrap_or_default()
+}
+
+fn load_cached_account_credential(account: &AccountRef, host_raw: &str) -> Credential {
+    let base = decode_credential(host_raw);
+    let Some(bytes) = kinetix::plugin::host_storage::get(&state_key(account)) else {
+        return base;
+    };
+    let Ok(text) = String::from_utf8(bytes) else {
+        return base;
+    };
+    let cached = decode_credential(&text);
+    if cached.refresh_token.is_some() && cached.refresh_token == base.refresh_token {
+        cached
+    } else {
+        base
+    }
+}
+
+fn discovery_state_key(provider_id: &str) -> String {
+    format!("discovery-cred:{provider_id}")
+}
+
+fn load_provider_credential(provider_id: &str, host_raw: &str) -> Credential {
+    let base = decode_credential(host_raw);
+    let Some(bytes) = kinetix::plugin::host_storage::get(&discovery_state_key(provider_id)) else {
+        return base;
+    };
+    let Ok(text) = String::from_utf8(bytes) else {
+        return base;
+    };
+    let cached = decode_credential(&text);
+    if cached.refresh_token.is_some() && cached.refresh_token == base.refresh_token {
+        cached
+    } else {
+        base
+    }
+}
+
+fn persist_provider_credential(provider_id: &str, cred: &Credential) {
+    if let Ok(serialized) = serde_json::to_string(cred) {
+        let _ = kinetix_plugin_sdk::helpers::kv_put_string(
+            &discovery_state_key(provider_id),
+            &serialized,
+        );
+    }
 }
 
 struct Component;
