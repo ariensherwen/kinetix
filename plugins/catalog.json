@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "plugins": [
+    {
+      "id": "dev.kinetix.antigravity-oauth",
+      "name": "Google Antigravity",
+      "description": "Google OAuth credential strategy and v1internal provider adapter for Antigravity.",
+      "publisher": "Kinetix",
+      "official": true,
+      "homepage": "https://github.com/LazyGreed/kinetix/tree/main/plugins/antigravity-oauth",
+      "latest_version": "0.1.0",
+      "artifact_name": "antigravity-oauth-0.1.0.kxp",
+      "capabilities": [
+        "credential_strategy",
+        "auth_flow",
+        "provider_adapter"
+      ],
+      "installable": false,
+      "note": "Official catalog metadata is available now; signed release-asset installation is a separate trust/distribution step."
+    }
+  ]
+}
