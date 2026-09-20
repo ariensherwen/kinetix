@@ -247,6 +247,13 @@ An `auth` action must reference an integration that declares both
 `auth_flow` and `credential_strategy`. The browser never executes guest code
 and never receives the credential returned by the authorization exchange.
 
+After a successful callback, Kinetix redirects back to the dashboard with only
+the plugin/provider identifiers. The dashboard removes those callback
+parameters from browser history, then invokes the provider's normal authenticated
+model-discovery endpoint. Newly advertised models are shown for explicit import;
+existing models are never overwritten and newly discovered models are not
+silently enabled without an operator action.
+
 ### Host-owned settings
 
 Plugins may also declare `[[ui.settings]]` fields of kind `text`, `secret`,
