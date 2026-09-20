@@ -59,6 +59,9 @@ export const ProvidersView: React.FC<ProvidersViewProps> = ({
   const [credentialHosts, setCredentialHosts] = useState('');
   const [followRedirects, setFollowRedirects] = useState(false);
   const [allowInsecureTls, setAllowInsecureTls] = useState(false);
+  const [wirePlugin, setWirePlugin] = useState('');
+  const [credentialPlugin, setCredentialPlugin] = useState('');
+  const [modelSourcePlugin, setModelSourcePlugin] = useState('');
   const [timeoutMs, setTimeoutMs] = useState(120000);
   const [capabilityMode, setCapabilityMode] = useState<'permissive' | 'strict'>('permissive');
   const [apiKey, setApiKey] = useState('');
@@ -208,6 +211,9 @@ export const ProvidersView: React.FC<ProvidersViewProps> = ({
     setCredentialHosts('');
     setFollowRedirects(false);
     setAllowInsecureTls(false);
+    setWirePlugin('');
+    setCredentialPlugin('');
+    setModelSourcePlugin('');
     setTimeoutMs(120000);
     setCapabilityMode('permissive');
     setApiKey('');
@@ -228,6 +234,9 @@ export const ProvidersView: React.FC<ProvidersViewProps> = ({
     setCredentialHosts(p.credentialHosts || '');
     setFollowRedirects(!!p.followRedirects);
     setAllowInsecureTls(!!p.allowInsecureTls);
+    setWirePlugin(p.wirePlugin || '');
+    setCredentialPlugin(p.credentialPlugin || '');
+    setModelSourcePlugin(p.modelSourcePlugin || '');
     setTimeoutMs(p.timeoutMs || 120000);
     setCapabilityMode(p.capabilityMode || 'permissive');
     // Credentials are never returned by the API; leave the key field blank.
@@ -251,6 +260,9 @@ export const ProvidersView: React.FC<ProvidersViewProps> = ({
     credential_hosts: credentialHosts.trim(),
     follow_redirects: followRedirects,
     allow_insecure_tls: allowInsecureTls,
+    wire_plugin: wirePlugin.trim(),
+    credential_plugin: credentialPlugin.trim(),
+    model_source_plugin: modelSourcePlugin.trim(),
     // Only sent when the admin actually typed a credential.
     ...(includeKey && apiKey.trim()
       ? { api_key: apiKey.trim(), account_label: accountLabel.trim() || null }
@@ -292,6 +304,9 @@ export const ProvidersView: React.FC<ProvidersViewProps> = ({
       followRedirects,
       credentialHosts: credentialHosts.trim(),
       allowInsecureTls,
+      wirePlugin: wirePlugin.trim(),
+      credentialPlugin: credentialPlugin.trim(),
+      modelSourcePlugin: modelSourcePlugin.trim(),
       lastPingMs: 0,
     };
 
@@ -1036,6 +1051,46 @@ export const ProvidersView: React.FC<ProvidersViewProps> = ({
                         <option value="permissive">Permissive (never reject on caps)</option>
                         <option value="strict">Strict (reject unmet caps)</option>
                       </select>
+                    </div>
+                    <div className="col-span-2 p-3 border-2 border-dashed border-[var(--ink)]/30 bg-[var(--surface)]/70">
+                      <div className="font-heading font-bold text-sm mb-2">Plugin bindings (optional)</div>
+                      <p className="text-xs font-body text-[var(--ink)]/65 mb-3">
+                        Bind this provider to capabilities from an enabled plugin. Use the explicit
+                        <code className="mx-1">plugin:&lt;id&gt;/&lt;capability&gt;</code>
+                        reference shown on the Plugins page.
+                      </p>
+                      <div className="space-y-2">
+                        <label className="block">
+                          <span className="block text-xs font-heading font-bold mb-1">Wire adapter</span>
+                          <input
+                            type="text"
+                            placeholder="plugin:dev.example.foo/foo-wire"
+                            value={wirePlugin}
+                            onChange={(e) => setWirePlugin(e.target.value)}
+                            className="w-full bg-[var(--surface)] border-2 border-[var(--ink)] px-3 py-2 text-sm font-mono sketch-shadow-sm focus:outline-none"
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="block text-xs font-heading font-bold mb-1">Credential strategy</span>
+                          <input
+                            type="text"
+                            placeholder="plugin:dev.example.foo/foo-oauth"
+                            value={credentialPlugin}
+                            onChange={(e) => setCredentialPlugin(e.target.value)}
+                            className="w-full bg-[var(--surface)] border-2 border-[var(--ink)] px-3 py-2 text-sm font-mono sketch-shadow-sm focus:outline-none"
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="block text-xs font-heading font-bold mb-1">Model source</span>
+                          <input
+                            type="text"
+                            placeholder="plugin:dev.example.foo/foo-models"
+                            value={modelSourcePlugin}
+                            onChange={(e) => setModelSourcePlugin(e.target.value)}
+                            className="w-full bg-[var(--surface)] border-2 border-[var(--ink)] px-3 py-2 text-sm font-mono sketch-shadow-sm focus:outline-none"
+                          />
+                        </label>
+                      </div>
                     </div>
                     <div className="col-span-2">
                       <label className="block text-sm font-heading font-bold text-[var(--ink)] mb-1">
