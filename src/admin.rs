@@ -2930,10 +2930,8 @@ pub fn is_blocked_ip(ip: std::net::IpAddr) -> bool {
     match ip {
         std::net::IpAddr::V4(v4) => {
             let octets = v4.octets();
-            let shared_address_space =
-                octets[0] == 100 && (64..=127).contains(&octets[1]);
-            let benchmarking =
-                octets[0] == 198 && matches!(octets[1], 18 | 19);
+            let shared_address_space = octets[0] == 100 && (64..=127).contains(&octets[1]);
+            let benchmarking = octets[0] == 198 && matches!(octets[1], 18 | 19);
             v4.is_loopback()
                 || v4.is_private()
                 || v4.is_link_local()
