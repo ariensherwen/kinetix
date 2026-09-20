@@ -584,11 +584,85 @@ impl auth_world::exports::auth_flow::Guest for Component {
             }
         }
 
+        let metadata_body = serde_json::json!({
+            "metadata": { "ideType": "ANTIGRAVITY" }
+        });
+
+        let mut project_id: Option<String> = None;
+        let mut tier_id: Option<String> = None;
+        let load_req = AuthHttpRequest {
+            method: "POST".into(),
+            url: LOAD_CODE_ASSIST_URL.into(),
+            headers: vec![
+                ("authorization".into(), format!("Bearer {access_token}")),
+                ("content-type".into(), "application/json".into()),
+                ("user-agent".into(), ANTIGRAVITY_USER_AGENT.into()),
+                ("x-request-source".into(), "local".into()),
+            ],
+            body: serde_json::to_vec(&metadata_body).unwrap_or_default(),
+            credential: None,
+        };
+        if let Ok(load_resp) = auth_world::kinetix::plugin::host_http::send(&load_req) {
+            if load_resp.status == 200 && !load_resp.body_truncated {
+                if let Ok(body) = String::from_utf8(load_resp.body) {
+                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&body) {
+                        project_id = value
+                            .get("cloudaicompanionProject")
+                            .and_then(|project| {
+                                project
+                                    .get("id")
+                                    .and_then(|id| id.as_str())
+                                    .or_else(|| project.as_str())
+                            })
+                            .map(str::to_string);
+                        tier_id = value
+                            .get("allowedTiers")
+                            .and_then(|tiers| tiers.as_array())
+                            .and_then(|tiers| {
+                                tiers.iter().find_map(|tier| {
+                                    if tier
+                                        .get("isDefault")
+                                        .and_then(|value| value.as_bool())
+                                        .unwrap_or(false)
+                                    {
+                                        tier.get("id")
+                                            .and_then(|value| value.as_str())
+                                            .map(str::to_string)
+                                    } else {
+                                        None
+                                    }
+                                })
+                            });
+                    }
+                }
+            }
+        }
+
+        if project_id.is_some() {
+            let onboard_req = AuthHttpRequest {
+                method: "POST".into(),
+                url: ONBOARD_USER_URL.into(),
+                headers: vec![
+                    ("authorization".into(), format!("Bearer {access_token}")),
+                    ("content-type".into(), "application/json".into()),
+                    ("user-agent".into(), ANTIGRAVITY_USER_AGENT.into()),
+                    ("x-request-source".into(), "local".into()),
+                ],
+                body: serde_json::to_vec(&serde_json::json!({
+                    "tierId": tier_id.as_deref().unwrap_or("legacy-tier"),
+                    "metadata": { "ideType": "ANTIGRAVITY" }
+                }))
+                .unwrap_or_default(),
+                credential: None,
+            };
+            let _ = auth_world::kinetix::plugin::host_http::send(&onboard_req);
+        }
+
         let secret = Credential {
             refresh_token: Some(refresh_token),
             access_token: Some(access_token),
             expiry: Some(expiry),
-            project_id: None,
+            project_id,
             email: email.clone(),
         };
         let secret_json = serde_json::to_string(&secret).map_err(|e| {
