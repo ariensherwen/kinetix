@@ -932,24 +932,14 @@ mod tests {
     #[tokio::test]
     async fn private_destination_override_is_operator_controlled() {
         assert!(
-            pinned_plugin_http_client(
-                "127.0.0.1",
-                443,
-                false,
-                Duration::from_secs(1),
-            )
-            .await
-            .is_err()
+            pinned_plugin_http_client("127.0.0.1", 443, false, Duration::from_secs(1),)
+                .await
+                .is_err()
         );
         assert!(
-            pinned_plugin_http_client(
-                "127.0.0.1",
-                443,
-                true,
-                Duration::from_secs(1),
-            )
-            .await
-            .is_ok()
+            pinned_plugin_http_client("127.0.0.1", 443, true, Duration::from_secs(1),)
+                .await
+                .is_ok()
         );
         assert!(blocked_plugin_hostname("db.internal"));
         assert!(blocked_plugin_hostname("metadata.google.internal"));
@@ -979,7 +969,12 @@ mod tests {
     async fn buffered_http_rejects_host_and_hop_by_hop_headers_before_send() {
         use bindings::kinetix::plugin::host_http::Host;
 
-        for header in ["Host", "Connection", "Proxy-Authorization", "Content-Length"] {
+        for header in [
+            "Host",
+            "Connection",
+            "Proxy-Authorization",
+            "Content-Length",
+        ] {
             let req = wit::types::HttpRequest {
                 method: "GET".into(),
                 url: "https://8.8.8.8/".into(),
