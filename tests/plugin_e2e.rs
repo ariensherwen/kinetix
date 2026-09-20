@@ -35,7 +35,14 @@ async fn manager() -> (PluginManager, Pool) {
     db::migrate(&pool).await.unwrap();
     let crypto = Arc::new(Crypto::new(&[7u8; 32]));
     let http = reqwest::Client::new();
-    let manager = PluginManager::new(pool.clone(), crypto, http, HostPolicy::default()).unwrap();
+    let manager = PluginManager::new(
+        pool.clone(),
+        crypto,
+        http,
+        HostPolicy::default(),
+        dir.join("plugin-packages"),
+    )
+    .unwrap();
     (manager, pool)
 }
 
@@ -62,6 +69,9 @@ async fn installs_enables_and_instantiates_a_real_component() {
 
     // Enable instantiates the component: this is the real proof the guest links
     // against the host's WIT world.
+    m.approve_permissions("dev.kinetix.antigravity-oauth")
+        .await
+        .expect("declared permissions should approve");
     m.enable("dev.kinetix.antigravity-oauth")
         .await
         .expect("a real component should enable against the host world");
@@ -85,6 +95,9 @@ async fn invokes_a_real_guest_capability_through_the_host_boundary() {
     let bytes = std::fs::read(&path).unwrap();
     let (m, _pool) = manager().await;
     m.install(&bytes, None, &[], false).await.unwrap();
+    m.approve_permissions("dev.kinetix.antigravity-oauth")
+        .await
+        .unwrap();
     m.enable("dev.kinetix.antigravity-oauth").await.unwrap();
 
     // Invoke the real `credential-strategy.resolve` export. With no matching
@@ -118,6 +131,9 @@ async fn a_real_guest_reports_usable_after_enable() {
     let bytes = std::fs::read(&path).unwrap();
     let (m, _pool) = manager().await;
     m.install(&bytes, None, &[], false).await.unwrap();
+    m.approve_permissions("dev.kinetix.antigravity-oauth")
+        .await
+        .unwrap();
     m.enable("dev.kinetix.antigravity-oauth").await.unwrap();
 
     // The plugin does not provide health-probe, so the host reports an unknown
@@ -139,6 +155,9 @@ async fn adapter_world_translates_the_antigravity_wire_format() {
     let bytes = std::fs::read(&path).unwrap();
     let (m, _pool) = manager().await;
     m.install(&bytes, None, &[], false).await.unwrap();
+    m.approve_permissions("dev.kinetix.antigravity-oauth")
+        .await
+        .unwrap();
     m.enable("dev.kinetix.antigravity-oauth").await.unwrap();
     let id = "dev.kinetix.antigravity-oauth";
 
@@ -212,6 +231,9 @@ async fn adapter_classifies_quota_exhaustion() {
     let bytes = std::fs::read(&path).unwrap();
     let (m, _pool) = manager().await;
     m.install(&bytes, None, &[], false).await.unwrap();
+    m.approve_permissions("dev.kinetix.antigravity-oauth")
+        .await
+        .unwrap();
     m.enable("dev.kinetix.antigravity-oauth").await.unwrap();
     let id = "dev.kinetix.antigravity-oauth";
 
