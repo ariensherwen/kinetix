@@ -534,47 +534,60 @@ export const PluginsView: React.FC = () => {
                           )}
                         </div>
 
-                        {integration.auth_flow && integration.credential_strategy && (
-                          <div className="mt-4 space-y-2">
-                            {providers
-                              .filter(
-                                (provider) =>
-                                  provider.credentialPlugin ===
-                                  `plugin:${selected.id}/${integration.credential_strategy}`,
-                              )
-                              .map((provider) => (
-                                <SketchButton
-                                  key={provider.id}
-                                  variant="primary"
-                                  className="gap-2"
-                                  disabled={busy !== null || selected.status !== 'enabled'}
-                                  onClick={() =>
-                                    void connectAccount(
-                                      selected.id,
-                                      integration.auth_flow!,
-                                      provider.id,
-                                    )
-                                  }
-                                >
-                                  <LogIn className="w-4 h-4" />
-                                  Connect {provider.name}
-                                </SketchButton>
-                              ))}
-                            {!providers.some(
+                        {selected.ui.actions
+                          .filter((action) => action.integration === integration.id)
+                          .map((action) => {
+                            if (
+                              action.kind !== 'auth' ||
+                              !integration.auth_flow ||
+                              !integration.credential_strategy
+                            ) {
+                              return null;
+                            }
+
+                            const compatibleProviders = providers.filter(
                               (provider) =>
                                 provider.credentialPlugin ===
                                 `plugin:${selected.id}/${integration.credential_strategy}`,
-                            ) && (
-                              <p className="text-xs font-body text-[var(--ink)]/60">
-                                Bind a provider&apos;s credential plugin to{' '}
-                                <code>
-                                  plugin:{selected.id}/{integration.credential_strategy}
-                                </code>{' '}
-                                before connecting an account.
-                              </p>
-                            )}
-                          </div>
-                        )}
+                            );
+
+                            return (
+                              <div key={action.id} className="mt-4 space-y-2">
+                                {action.description && (
+                                  <p className="text-xs font-body text-[var(--ink)]/65">
+                                    {action.description}
+                                  </p>
+                                )}
+                                {compatibleProviders.map((provider) => (
+                                  <SketchButton
+                                    key={provider.id}
+                                    variant="primary"
+                                    className="gap-2"
+                                    disabled={busy !== null || selected.status !== 'enabled'}
+                                    onClick={() =>
+                                      void connectAccount(
+                                        selected.id,
+                                        integration.auth_flow!,
+                                        provider.id,
+                                      )
+                                    }
+                                  >
+                                    <LogIn className="w-4 h-4" />
+                                    {action.label} · {provider.name}
+                                  </SketchButton>
+                                ))}
+                                {compatibleProviders.length === 0 && (
+                                  <p className="text-xs font-body text-[var(--ink)]/60">
+                                    Bind a provider&apos;s credential plugin to{' '}
+                                    <code>
+                                      plugin:{selected.id}/{integration.credential_strategy}
+                                    </code>{' '}
+                                    before using “{action.label}”.
+                                  </p>
+                                )}
+                              </div>
+                            );
+                          })}
                       </div>
                     ))}
                   </div>
