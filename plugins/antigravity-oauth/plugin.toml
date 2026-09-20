@@ -24,7 +24,7 @@ auth_flow = "antigravity"
 
 [permissions]
 # Only the token endpoint is ever contacted (control-plane, buffered HTTP).
-network_hosts = ["oauth2.googleapis.com", "www.googleapis.com"]
+network_hosts = ["accounts.google.com", "oauth2.googleapis.com", "www.googleapis.com"]
 credential_scopes = ["provider:antigravity"]
 # The refresh_token exchange puts the secret in a POST body, which the opaque
 # handle model cannot express, so this plugin requires plaintext credential
