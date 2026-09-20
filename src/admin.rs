@@ -3675,6 +3675,263 @@ pub async fn install_plugin(
     })))
 }
 
+#[derive(Deserialize)]
+pub struct PluginAuthStartBody {
+    pub plugin_id: String,
+    pub flow_name: String,
+    pub provider_id: String,
+}
+
+/// Start a one-time browser authorization session for a plugin integration.
+pub async fn start_plugin_auth(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+    Json(body): Json<PluginAuthStartBody>,
+) -> ApiResult {
+    let manager = plugin_manager(&state)?;
+    let row = manager
+        .get(&body.plugin_id)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::not_found("plugin not found"))?;
+    let manifest = row
+        .manifest()
+        .ok_or_else(|| ApiError::bad("plugin manifest is unreadable"))?;
+
+    let integration = manifest
+        .integrations
+        .iter()
+        .find(|integration| integration.auth_flow.as_deref() == Some(body.flow_name.as_str()))
+        .ok_or_else(|| ApiError::bad("auth flow is not exposed by a plugin integration"))?;
+    let credential_strategy = integration
+        .credential_strategy
+        .as_deref()
+        .ok_or_else(|| ApiError::bad("integration has no credential strategy"))?;
+
+    let provider = db::get_provider(&state.pool, &body.provider_id)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::not_found("provider not found"))?;
+    let expected_binding = format!("plugin:{}/{}", body.plugin_id, credential_strategy);
+    if provider.credential_plugin != expected_binding {
+        return Err(ApiError::bad(format!(
+            "provider '{}' is not bound to integration credential strategy '{}'",
+            provider.id, expected_binding
+        )));
+    }
+
+    let redirect_uri = format!(
+        "{}/admin/api/plugins/auth/callback",
+        state.config.public_base_url.trim_end_matches('/')
+    );
+    let pending = state.plugin_auth_sessions.create(
+        &body.plugin_id,
+        &body.flow_name,
+        &body.provider_id,
+        &expected_binding,
+        &redirect_uri,
+    );
+
+    let authorize_url = match manager
+        .auth_begin(
+            &body.plugin_id,
+            &body.flow_name,
+            &redirect_uri,
+            &pending.state,
+            Some(&pending.pkce_challenge),
+        )
+        .await
+    {
+        Ok(url) => url,
+        Err(error) => {
+            state.plugin_auth_sessions.revoke(&pending.state);
+            return Err(ApiError::bad(error.to_string()));
+        }
+    };
+
+    let parsed = url::Url::parse(&authorize_url)
+        .map_err(|_| ApiError::bad("plugin returned an invalid authorization URL"))?;
+    if parsed.scheme() != "https" {
+        state.plugin_auth_sessions.revoke(&pending.state);
+        return Err(ApiError::bad("plugin authorization URL must use https"));
+    }
+    let auth_host = parsed
+        .host_str()
+        .ok_or_else(|| ApiError::bad("plugin authorization URL has no host"))?;
+    if !manifest
+        .permissions
+        .network_hosts
+        .iter()
+        .any(|pattern| crate::plugins::manifest::host_matches(pattern, auth_host))
+    {
+        state.plugin_auth_sessions.revoke(&pending.state);
+        return Err(ApiError::bad(format!(
+            "authorization host '{auth_host}' is not declared in plugin network_hosts"
+        )));
+    }
+
+    Ok(Json(json!({
+        "authorize_url": authorize_url,
+        "state": pending.state,
+        "expires_in_secs": 600,
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct PluginAuthCallbackQuery {
+    pub state: String,
+    pub code: Option<String>,
+    pub error: Option<String>,
+}
+
+/// Browser callback. The one-time high-entropy state is the callback
+/// credential and is consumed before code exchange, so replay fails closed.
+pub async fn plugin_auth_callback(
+    State(state): State<AppState>,
+    Query(query): Query<PluginAuthCallbackQuery>,
+) -> Result<Redirect, ApiError> {
+    if !db_healthy(&state).await {
+        return Err(ApiError(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "plugin account authorization unavailable: control plane degraded".into(),
+        ));
+    }
+
+    let session = state
+        .plugin_auth_sessions
+        .take(&query.state)
+        .ok_or_else(|| ApiError::bad("invalid or expired plugin auth state"))?;
+
+    if query.error.is_some() {
+        let _ = db::insert_audit(
+            &state.pool,
+            "admin",
+            "plugin_auth_cancelled",
+            "plugin",
+            &session.plugin_id,
+            &session.flow_name,
+            "Provider authorization was cancelled or rejected.",
+        )
+        .await;
+        return Ok(Redirect::to("/admin/plugins?plugin_auth=cancelled"));
+    }
+
+    let code = query
+        .code
+        .as_deref()
+        .filter(|code| !code.trim().is_empty())
+        .ok_or_else(|| ApiError::bad("authorization callback is missing code"))?;
+
+    let manager = plugin_manager(&state)?;
+    let result = match manager
+        .auth_exchange(
+            &session.plugin_id,
+            &session.flow_name,
+            code,
+            &session.redirect_uri,
+            Some(&session.pkce_verifier),
+        )
+        .await
+    {
+        Ok(result) => result,
+        Err(error) => {
+            tracing::warn!(
+                plugin = %session.plugin_id,
+                flow = %session.flow_name,
+                error = %error,
+                "plugin account authorization exchange failed"
+            );
+            let _ = db::insert_audit(
+                &state.pool,
+                "admin",
+                "plugin_auth_failed",
+                "plugin",
+                &session.plugin_id,
+                &session.flow_name,
+                "Provider authorization code exchange failed.",
+            )
+            .await;
+            return Ok(Redirect::to("/admin/plugins?plugin_auth=error"));
+        }
+    };
+
+    if result.secret_json.len() > 256 * 1024 {
+        return Err(ApiError::bad("plugin auth credential exceeds 256 KiB"));
+    }
+    let secret_value: Value = serde_json::from_str(&result.secret_json)
+        .map_err(|_| ApiError::bad("plugin auth credential is not valid JSON"))?;
+    if !secret_value.is_object() {
+        return Err(ApiError::bad(
+            "plugin auth credential must be a JSON object",
+        ));
+    }
+
+    let provider = db::get_provider(&state.pool, &session.provider_id)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::not_found("provider not found"))?;
+    if provider.credential_plugin != session.credential_binding {
+        let _ = db::insert_audit(
+            &state.pool,
+            "admin",
+            "plugin_auth_binding_changed",
+            "provider",
+            &provider.id,
+            &provider.name,
+            "Provider credential binding changed during browser authorization; enrollment refused.",
+        )
+        .await;
+        return Ok(Redirect::to(
+            "/admin/plugins?plugin_auth=binding_changed",
+        ));
+    }
+
+    let encrypted = state
+        .crypto
+        .encrypt(&result.secret_json)
+        .map_err(ApiError::internal)?;
+    let label = result
+        .account_label
+        .as_deref()
+        .map(str::trim)
+        .filter(|label| !label.is_empty())
+        .unwrap_or(&provider.name);
+    let account_id = db::insert_account(
+        &state.pool,
+        &provider.id,
+        label,
+        &encrypted,
+        "oauth:****",
+        1,
+        1,
+        None,
+        "unknown",
+    )
+    .await
+    .map_err(ApiError::internal)?;
+
+    let _ = db::insert_audit(
+        &state.pool,
+        "admin",
+        "plugin_account_authorized",
+        "account",
+        &account_id,
+        label,
+        &format!(
+            "Authorized account through plugin {} flow {}.",
+            session.plugin_id, session.flow_name
+        ),
+    )
+    .await;
+    state
+        .registry
+        .reload(&state.pool)
+        .await
+        .map_err(ApiError::internal)?;
+
+    Ok(Redirect::to("/admin/plugins?plugin_auth=success"))
+}
+
 /// `POST /admin/api/plugins/{id}/enable`.
 pub async fn enable_plugin(
     State(state): State<AppState>,
