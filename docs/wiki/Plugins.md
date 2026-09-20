@@ -406,6 +406,19 @@ The reactivated package is always **disabled** and all permission grants are
 cleared even when the diff is empty. An operator must review and approve the
 rolled-back manifest before it can be enabled again.
 
+## Dashboard organization
+
+The Plugins & Integrations page is split into three host-owned views:
+
+- **Discover** — browse bundled catalog metadata and install trusted packages;
+- **Installed** — inspect lifecycle state, permissions, settings, runtime limits,
+  integrations, package history, and rollback;
+- **Updates** — show only installed catalog plugins whose published catalog
+  version differs, with review-first permission-diff flow before upgrade.
+
+The views are presentation only. They do not alter package trust, permission
+approval, enablement, or rollback semantics.
+
 ## Operating Plugins
 
 ### CLI Workflow
