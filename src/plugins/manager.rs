@@ -974,7 +974,7 @@ impl PluginManager {
     ) -> Result<
         crate::plugins::runtime::auth_bindings::kinetix::plugin::types::AuthResult,
         PluginFault,
-    > {
+    >{
         if !self.provides(id, Capability::AuthFlow, flow_name).await {
             return Err(PluginFault::InvalidResult(format!(
                 "plugin '{id}' does not provide auth flow '{flow_name}'"
@@ -1325,13 +1325,7 @@ impl PluginManager {
         let _guard = rt.arm_deadline(&mut p.store, Duration::from_secs(30));
         let res = plugin
             .model_source_v2()
-            .call_discover(
-                &mut p.store,
-                provider_id,
-                account_id,
-                base_url,
-                models_path,
-            )
+            .call_discover(&mut p.store, provider_id, account_id, base_url, models_path)
             .await
             .map_err(map_call_error)
             .and_then(map_model_source_v2_result);
