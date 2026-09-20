@@ -1262,10 +1262,7 @@ fn map_plugin_result<T>(r: Result<T, wit::types::PluginError>) -> Result<T, Plug
 
 /// Like [`map_plugin_result`] but for the separately-bound auth world.
 fn map_auth_result<T>(
-    result: Result<
-        T,
-        crate::plugins::runtime::auth_bindings::kinetix::plugin::types::PluginError,
-    >,
+    result: Result<T, crate::plugins::runtime::auth_bindings::kinetix::plugin::types::PluginError>,
 ) -> Result<T, PluginFault> {
     result.map_err(|e| PluginFault::PluginError {
         code: e.code,
