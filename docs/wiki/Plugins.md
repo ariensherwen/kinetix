@@ -263,6 +263,22 @@ operation. Plugins never receive filesystem access to this cache.
 
 ---
 
+## Plugin Catalog
+
+Kinetix ships an embedded official catalog metadata file at
+`plugins/catalog.json`, exposed through `GET /admin/api/plugins/catalog`.
+The catalog powers dashboard discovery, but it is deliberately **not** a trust
+root for package installation.
+
+Catalog metadata may describe publisher, capabilities, version, and expected
+artifact naming. Package installation still requires the normal Kinetix package
+pipeline: package bytes are hashed, signatures are evaluated, permissions are
+reviewed, and the plugin installs disabled.
+
+Remote signed release-asset installation can be layered on top of this catalog
+once publisher trust keys and release artifacts are distributed independently
+of catalog metadata.
+
 ## Operating Plugins
 
 ### CLI Workflow
