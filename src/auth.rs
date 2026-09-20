@@ -20,6 +20,103 @@ use crate::types::ProxyError;
 
 pub const SESSION_COOKIE: &str = "kinetix_admin";
 
+const PLUGIN_AUTH_TTL: Duration = Duration::from_secs(10 * 60);
+
+/// One-time browser authorization session for a plugin-provided account flow.
+/// Authorization codes, PKCE verifiers, and CSRF state are intentionally
+/// in-memory only and disappear on restart.
+#[derive(Clone, Debug)]
+pub struct PluginAuthSession {
+    pub plugin_id: String,
+    pub flow_name: String,
+    pub provider_id: String,
+    pub credential_binding: String,
+    pub redirect_uri: String,
+    pub pkce_verifier: String,
+    expires_at: Instant,
+}
+
+#[derive(Clone, Debug)]
+pub struct PluginAuthStart {
+    pub state: String,
+    pub pkce_challenge: String,
+}
+
+pub struct PluginAuthSessions {
+    inner: Mutex<HashMap<String, PluginAuthSession>>,
+}
+
+impl PluginAuthSessions {
+    pub fn new() -> Self {
+        Self {
+            inner: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn create(
+        &self,
+        plugin_id: &str,
+        flow_name: &str,
+        provider_id: &str,
+        credential_binding: &str,
+        redirect_uri: &str,
+    ) -> PluginAuthStart {
+        use base64::Engine;
+        use rand::RngCore;
+        use sha2::{Digest, Sha256};
+
+        let mut state_bytes = [0u8; 32];
+        let mut verifier_bytes = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut state_bytes);
+        rand::thread_rng().fill_bytes(&mut verifier_bytes);
+
+        let state = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(state_bytes);
+        let pkce_verifier =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(verifier_bytes);
+        let pkce_challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(Sha256::digest(pkce_verifier.as_bytes()));
+
+        let now = Instant::now();
+        let mut map = self.inner.lock();
+        map.retain(|_, session| session.expires_at > now);
+        map.insert(
+            state.clone(),
+            PluginAuthSession {
+                plugin_id: plugin_id.to_string(),
+                flow_name: flow_name.to_string(),
+                provider_id: provider_id.to_string(),
+                credential_binding: credential_binding.to_string(),
+                redirect_uri: redirect_uri.to_string(),
+                pkce_verifier,
+                expires_at: now + PLUGIN_AUTH_TTL,
+            },
+        );
+
+        PluginAuthStart {
+            state,
+            pkce_challenge,
+        }
+    }
+
+    /// Consume a state token exactly once.
+    pub fn take(&self, state: &str) -> Option<PluginAuthSession> {
+        let now = Instant::now();
+        let mut map = self.inner.lock();
+        map.retain(|_, session| session.expires_at > now);
+        map.remove(state).filter(|session| session.expires_at > now)
+    }
+
+    pub fn revoke(&self, state: &str) {
+        self.inner.lock().remove(state);
+    }
+}
+
+impl Default for PluginAuthSessions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Setting key under which the admin password hash is stored in the database.
 pub const ADMIN_PASSWORD_SETTING: &str = "admin_password_hash";
 
@@ -281,4 +378,53 @@ fn validate_cf_access(state: &AppState, token: &str, aud: &str) -> Result<(), St
     decode::<serde_json::Value>(token, &key, &validation)
         .map(|_| ())
         .map_err(|e| format!("Access token rejected: {e}"))
+}
+
+
+#[cfg(test)]
+mod plugin_auth_tests {
+    use super::*;
+
+    #[test]
+    fn plugin_auth_state_is_random_and_one_time() {
+        let sessions = PluginAuthSessions::new();
+        let first = sessions.create(
+            "dev.example.plugin",
+            "login",
+            "prov_1",
+            "plugin:dev.example.plugin/login-credential",
+            "https://example.test/admin/api/plugins/auth/callback",
+        );
+        let second = sessions.create(
+            "dev.example.plugin",
+            "login",
+            "prov_1",
+            "plugin:dev.example.plugin/login-credential",
+            "https://example.test/admin/api/plugins/auth/callback",
+        );
+
+        assert_ne!(first.state, second.state);
+        assert_ne!(first.pkce_challenge, second.pkce_challenge);
+        let session = sessions.take(&first.state).expect("state should be live");
+        assert_eq!(session.plugin_id, "dev.example.plugin");
+        assert_eq!(session.flow_name, "login");
+        assert_eq!(session.provider_id, "prov_1");
+        assert!(!session.pkce_verifier.is_empty());
+        assert!(sessions.take(&first.state).is_none());
+        assert!(sessions.take(&second.state).is_some());
+    }
+
+    #[test]
+    fn revoked_plugin_auth_state_cannot_be_consumed() {
+        let sessions = PluginAuthSessions::new();
+        let pending = sessions.create(
+            "dev.example.plugin",
+            "login",
+            "prov_1",
+            "plugin:dev.example.plugin/login-credential",
+            "https://example.test/callback",
+        );
+        sessions.revoke(&pending.state);
+        assert!(sessions.take(&pending.state).is_none());
+    }
 }
