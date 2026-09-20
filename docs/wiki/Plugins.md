@@ -186,6 +186,22 @@ The build script compiles the crate to `wasm32-wasip1` (or `wasm32-unknown-unkno
 
 The output package is produced at `plugins/antigravity-oauth/target/antigravity-oauth-0.1.0.kxp`.
 
+### Installed package retention
+
+When Kinetix accepts a package, it preserves the exact `.kxp` bytes in a
+content-addressed cache under:
+
+```text
+$KINETIX_DATA_DIR/plugins/packages/<plugin-id>/<sha256>.kxp
+```
+
+SQLite records the plugin id, declared version, SHA-256, signature status,
+source, and relative package path. Previous package versions are retained when
+a plugin is upgraded, providing immutable provenance and the artifact inputs
+needed for a future rollback operation. The active runtime still uses the
+validated manifest/component stored by the host; plugins never receive
+filesystem access to this cache.
+
 ---
 
 ## Operating Plugins
