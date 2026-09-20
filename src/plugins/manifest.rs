@@ -99,6 +99,53 @@ pub fn validate(manifest: Manifest, policy: HostPolicy) -> Result<ValidatedManif
         }
     }
 
+    let mut integration_ids = std::collections::HashSet::new();
+    for integration in &manifest.integrations {
+        validate_integration_id(&integration.id)?;
+        if !integration_ids.insert(integration.id.as_str()) {
+            bail!("duplicate integration id '{}'", integration.id);
+        }
+        if integration.name.trim().is_empty() {
+            bail!("integration '{}' name must not be empty", integration.id);
+        }
+        if integration.provider_adapter.is_none()
+            && integration.credential_strategy.is_none()
+            && integration.model_source.is_none()
+        {
+            bail!(
+                "integration '{}' must reference at least one provided capability",
+                integration.id
+            );
+        }
+        if let Some(name) = &integration.provider_adapter {
+            if !manifest.provides.provider_adapters.contains(name) {
+                bail!(
+                    "integration '{}' references unknown provider_adapter '{}'",
+                    integration.id,
+                    name
+                );
+            }
+        }
+        if let Some(name) = &integration.credential_strategy {
+            if !manifest.provides.credential_strategies.contains(name) {
+                bail!(
+                    "integration '{}' references unknown credential_strategy '{}'",
+                    integration.id,
+                    name
+                );
+            }
+        }
+        if let Some(name) = &integration.model_source {
+            if !manifest.provides.model_sources.contains(name) {
+                bail!(
+                    "integration '{}' references unknown model_source '{}'",
+                    integration.id,
+                    name
+                );
+            }
+        }
+    }
+
     for host in &manifest.permissions.network_hosts {
         validate_network_host(host)?;
     }
@@ -167,6 +214,21 @@ fn validate_id(id: &str) -> Result<()> {
     }
     if id.starts_with('.') || id.ends_with('.') || id.contains("..") {
         bail!("plugin id '{id}' has an invalid dot placement");
+    }
+    Ok(())
+}
+
+fn validate_integration_id(id: &str) -> Result<()> {
+    if id.is_empty() || id.len() > 64 {
+        bail!("integration id must be 1..=64 characters");
+    }
+    let ok = id
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_');
+    if !ok {
+        bail!(
+            "integration id '{id}' may only contain lowercase letters, digits, '-', '_'"
+        );
     }
     Ok(())
 }
@@ -241,6 +303,12 @@ plugin_api = "1"
 [provides]
 model_sources = ["foo-models"]
 
+[[integrations]]
+id = "foo"
+name = "Foo Cloud"
+description = "Foo provider integration"
+model_source = "foo-models"
+
 [permissions]
 network_hosts = ["api.foo.example", "*.svc.example"]
 
@@ -268,6 +336,42 @@ storage = "2MiB"
     fn rejects_no_capabilities() {
         let bad = GOOD.replace("model_sources = [\"foo-models\"]", "");
         assert!(parse_and_validate(&bad, HostPolicy::default()).is_err());
+    }
+
+    #[test]
+    fn rejects_integration_referencing_missing_capability() {
+        let bad = GOOD.replace(
+            "model_source = \"foo-models\"",
+            "model_source = \"missing-models\"",
+        );
+        let err = parse_and_validate(&bad, HostPolicy::default()).unwrap_err();
+        assert!(
+            err.to_string().contains("unknown model_source 'missing-models'"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_integration_ids() {
+        let duplicate = format!(
+            "{GOOD}\n[[integrations]]\nid = \"foo\"\nname = \"Duplicate\"\nmodel_source = \"foo-models\"\n"
+        );
+        let err = parse_and_validate(&duplicate, HostPolicy::default()).unwrap_err();
+        assert!(
+            err.to_string().contains("duplicate integration id 'foo'"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn rejects_empty_integration_binding() {
+        let bad = GOOD.replace("model_source = \"foo-models\"", "");
+        let err = parse_and_validate(&bad, HostPolicy::default()).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("must reference at least one provided capability"),
+            "{err}"
+        );
     }
 
     #[test]
