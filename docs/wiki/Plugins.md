@@ -98,41 +98,56 @@ A Kinetix Plugin package is an uncompressed tar archive containing:
 
 ```text
 foo.kxp
-├── plugin.toml       # Plugin manifest
-├── plugin.wasm       # Compiled WebAssembly component
-└── plugin.sig        # Optional Ed25519 signature
+├── plugin.toml          # Plugin manifest
+├── plugin.wasm          # Compiled WebAssembly component
+├── signature.ed25519    # Optional Ed25519 signature
+├── README.md            # Optional documentation
+└── LICENSE              # Optional license text
 ```
 
 ### Manifest Example (`plugin.toml`)
 
 ```toml
+manifest_version = 1
 plugin_api = "1"
 id = "dev.kinetix.antigravity-oauth"
-name = "Antigravity OAuth Adapter"
+name = "Antigravity OAuth"
 version = "0.1.0"
-description = "Google OAuth 2.0 credential strategy and v1internal wire adapter"
-homepage = "https://github.com/LazyGreed/kinetix"
-license = "MIT"
 
-[provides.credential_strategies.antigravity-oauth]
-display_name = "Google OAuth 2.0"
-description = "Acquires and refreshes Google OAuth tokens using refresh tokens"
+[provides]
+credential_strategies = ["antigravity-oauth"]
+provider_adapters = ["antigravity"]
 
-[provides.provider_adapters.antigravity]
-display_name = "Antigravity (v1internal)"
-description = "Adapter for Google Internal v1internal generative API"
+[[integrations]]
+id = "antigravity"
+name = "Google Antigravity"
+description = "Connect a Google Antigravity account and use the v1internal model API."
+provider_adapter = "antigravity"
+credential_strategy = "antigravity-oauth"
 
 [permissions]
-network_hosts = [
-  "oauth2.googleapis.com",
-  "accounts.google.com"
-]
-storage = true
+network_hosts = ["oauth2.googleapis.com"]
+credential_scopes = ["provider:antigravity"]
+credential_read = true
 
 [limits]
-max_memory_mb = 32
-timeout_ms = 10000
+memory = "64MiB"
+wall_time_ms = 10000
+max_outbound_requests = 2
+max_http_body = "1MiB"
+storage = "1MiB"
 ```
+
+### Integration descriptors
+
+An optional `[[integrations]]` entry groups low-level capabilities into a
+user-facing integration. It is declarative metadata only: it executes no
+dashboard code and grants no additional authority.
+
+Every referenced `provider_adapter`, `credential_strategy`, or
+`model_source` must be declared by the same plugin in `[provides]`. Kinetix
+rejects duplicate integration IDs, empty integrations, and references to
+undeclared capabilities during installation.
 
 ---
 
