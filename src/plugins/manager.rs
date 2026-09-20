@@ -1717,6 +1717,78 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn backing_allows_credentials_only_for_matching_strategy_binding() {
+        let dir = std::env::temp_dir().join(format!(
+            "kinetix-plugin-scope-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let url = format!("sqlite://{}?mode=rwc", dir.join("t.db").display());
+        let pool = crate::db::connect(&url).await.unwrap();
+        crate::db::migrate(&pool).await.unwrap();
+        let crypto = Arc::new(Crypto::new(&[13u8; 32]));
+
+        let provider_id = crate::db::insert_provider(
+            &pool,
+            &crate::db::NewProvider {
+                name: "Bound",
+                base_url: "https://example.com",
+                wire_format: crate::types::WireFormat::Plugin,
+                auth_scheme: crate::types::AuthScheme::Bearer,
+                custom_header_name: None,
+                custom_param_name: None,
+                extra_headers: serde_json::json!({}),
+                timeout_ms: 30_000,
+                capability_mode: "permissive",
+                models_path: None,
+                rate_limit_rules: serde_json::json!({}),
+                follow_redirects: false,
+                credential_hosts: "",
+                allow_insecure_tls: false,
+                wire_plugin: "plugin:dev.example.plugin/adapter",
+                credential_plugin: "plugin:dev.example.plugin/oauth",
+                model_source_plugin: "",
+            },
+        )
+        .await
+        .unwrap();
+
+        let backing = Backing { pool, crypto };
+        assert!(
+            backing
+                .credential_scope_allows(
+                    "dev.example.plugin",
+                    &provider_id,
+                    &["credential_strategy:oauth".into()],
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            !backing
+                .credential_scope_allows(
+                    "dev.example.plugin",
+                    &provider_id,
+                    &["credential_strategy:other".into()],
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            !backing
+                .credential_scope_allows(
+                    "dev.other.plugin",
+                    &provider_id,
+                    &["credential_strategy:oauth".into()],
+                )
+                .await
+                .unwrap()
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
     async fn backing_rejects_cross_provider_account_lookup() {
         let dir = std::env::temp_dir().join(format!(
             "kinetix-plugin-credential-test-{}",
