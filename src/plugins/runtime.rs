@@ -864,6 +864,7 @@ mod tests {
         let linker = rt.linker().unwrap();
         let ctx = HostCtx {
             plugin_id: "test".into(),
+            capability: "test".into(),
             network_hosts: vec![],
             allow_private_network: false,
             credential_read: false,
@@ -890,6 +891,7 @@ mod tests {
     fn test_ctx(buffered_http_allowed: bool, network_hosts: Vec<String>) -> HostCtx {
         HostCtx {
             plugin_id: "test".into(),
+            capability: "test".into(),
             network_hosts,
             allow_private_network: false,
             credential_read: false,
