@@ -4409,7 +4409,12 @@ pub async fn plugin_auth_callback(
         .await
         .map_err(ApiError::internal)?;
 
-    Ok(Redirect::to("/admin/plugins?plugin_auth=success"))
+    let callback_query = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("plugin_auth", "success")
+        .append_pair("plugin_id", &session.plugin_id)
+        .append_pair("provider_id", &provider.id)
+        .finish();
+    Ok(Redirect::to(&format!("/admin/plugins?{callback_query}")))
 }
 
 /// `GET /admin/api/plugins/{id}/packages/{sha256}/preview` — inspect a retained rollback target.
