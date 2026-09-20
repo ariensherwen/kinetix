@@ -19,6 +19,7 @@ import {
   PluginCatalogEntry,
   PluginDetail,
   PluginPermissionResponse,
+  PluginRollbackPreview,
   PluginSettingState,
   PluginSummary,
 } from '../../lib/resources';
@@ -81,6 +82,7 @@ export const PluginsView: React.FC = () => {
   const [permissions, setPermissions] = useState<PluginPermissionResponse | null>(null);
   const [settings, setSettings] = useState<PluginSettingState[]>([]);
   const [settingDrafts, setSettingDrafts] = useState<Record<string, string | boolean>>({});
+  const [rollbackPreview, setRollbackPreview] = useState<PluginRollbackPreview | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -181,6 +183,7 @@ export const PluginsView: React.FC = () => {
 
   const selectPlugin = async (id: string) => {
     setSelectedId(id);
+    setRollbackPreview(null);
     setBusy('detail');
     try {
       await loadDetail(id);
@@ -275,6 +278,39 @@ export const PluginsView: React.FC = () => {
       setSettings(response.settings);
       setSettingDrafts((current) => ({ ...current, [key]: '' }));
       setNotice(`Cleared plugin setting “${key}”.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const reviewRollback = async (id: string, sha256: string) => {
+    setBusy(`preview:${sha256}`);
+    setError(null);
+    try {
+      const preview = await Kinetix.previewPluginRollback(id, sha256);
+      setRollbackPreview(preview);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const confirmRollback = async () => {
+    if (!selectedId || !rollbackPreview) return;
+    const target = rollbackPreview;
+    setBusy(`rollback:${target.package_sha256}`);
+    setError(null);
+    setNotice(null);
+    try {
+      await Kinetix.rollbackPlugin(selectedId, target.package_sha256);
+      setRollbackPreview(null);
+      setNotice(
+        `Rolled back to v${target.target_version}. Review permissions before enabling.`,
+      );
+      await refresh(selectedId);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -930,15 +966,9 @@ export const PluginsView: React.FC = () => {
                             <SketchButton
                               variant="secondary"
                               disabled={busy !== null}
-                              onClick={() =>
-                                void mutate(
-                                  `rollback:${pkg.package_sha256}`,
-                                  () => Kinetix.rollbackPlugin(selected.id, pkg.package_sha256),
-                                  `Rolled back to v${pkg.version}. Review permissions before enabling.`,
-                                )
-                              }
+                              onClick={() => void reviewRollback(selected.id, pkg.package_sha256)}
                             >
-                              {busy === `rollback:${pkg.package_sha256}` ? 'Restoring…' : 'Roll back'}
+                              {busy === `preview:${pkg.package_sha256}` ? 'Reviewing…' : 'Review rollback'}
                             </SketchButton>
                           )}
                           <span className="text-xs text-[var(--ink)]/55">Stored package</span>
@@ -947,6 +977,91 @@ export const PluginsView: React.FC = () => {
                         </div>
                       );
                     })}
+                  </div>
+                </WobblyCard>
+              )}
+
+              {rollbackPreview && (
+                <WobblyCard decoration="tape" className="p-5">
+                  <div className="flex flex-col md:flex-row md:items-start gap-4">
+                    <div className="flex-1">
+                      <h4 className="text-lg font-heading font-bold">
+                        Review rollback: v{rollbackPreview.current_version} → v{rollbackPreview.target_version}
+                      </h4>
+                      <p className="text-sm font-body text-[var(--ink)]/70 mt-1">
+                        The retained package has been re-hashed and its manifest revalidated for this preview.
+                        Rollback will still recompile it, disable the plugin, and clear every approved permission.
+                      </p>
+                    </div>
+                    <SketchBadge variant={rollbackPreview.signature === 'verified' ? 'green' : 'yellow'}>
+                      {rollbackPreview.signature}
+                    </SketchBadge>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div>
+                      <h5 className="font-heading font-bold text-sm mb-2">Network hosts</h5>
+                      {rollbackPreview.permission_diff.network_hosts.added.length === 0 &&
+                      rollbackPreview.permission_diff.network_hosts.removed.length === 0 ? (
+                        <p className="text-xs font-mono text-[var(--ink)]/55">No change</p>
+                      ) : (
+                        <div className="space-y-1 text-xs font-mono">
+                          {rollbackPreview.permission_diff.network_hosts.added.map((value) => (
+                            <div key={`host-add-${value}`}>+ {value}</div>
+                          ))}
+                          {rollbackPreview.permission_diff.network_hosts.removed.map((value) => (
+                            <div key={`host-remove-${value}`}>− {value}</div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <h5 className="font-heading font-bold text-sm mb-2">Credential scopes</h5>
+                      {rollbackPreview.permission_diff.credential_scopes.added.length === 0 &&
+                      rollbackPreview.permission_diff.credential_scopes.removed.length === 0 ? (
+                        <p className="text-xs font-mono text-[var(--ink)]/55">No change</p>
+                      ) : (
+                        <div className="space-y-1 text-xs font-mono">
+                          {rollbackPreview.permission_diff.credential_scopes.added.map((value) => (
+                            <div key={`scope-add-${value}`}>+ {value}</div>
+                          ))}
+                          {rollbackPreview.permission_diff.credential_scopes.removed.map((value) => (
+                            <div key={`scope-remove-${value}`}>− {value}</div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 p-3 bg-[var(--erased)]/60 border border-dashed border-[var(--ink)]/25 text-sm">
+                    Plaintext credential access:{' '}
+                    <strong>
+                      {rollbackPreview.permission_diff.credential_read.changed
+                        ? `${rollbackPreview.permission_diff.credential_read.from ? 'enabled' : 'disabled'} → ${rollbackPreview.permission_diff.credential_read.to ? 'enabled' : 'disabled'}`
+                        : rollbackPreview.permission_diff.credential_read.to
+                          ? 'enabled (unchanged)'
+                          : 'disabled (unchanged)'}
+                    </strong>
+                  </div>
+
+                  <div className="mt-4 flex gap-2 flex-wrap">
+                    <SketchButton
+                      variant="primary"
+                      disabled={busy !== null}
+                      onClick={() => void confirmRollback()}
+                    >
+                      {busy === `rollback:${rollbackPreview.package_sha256}`
+                        ? 'Restoring…'
+                        : `Confirm rollback to v${rollbackPreview.target_version}`}
+                    </SketchButton>
+                    <SketchButton
+                      variant="secondary"
+                      disabled={busy !== null}
+                      onClick={() => setRollbackPreview(null)}
+                    >
+                      Cancel
+                    </SketchButton>
                   </div>
                 </WobblyCard>
               )}
