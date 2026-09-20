@@ -1594,18 +1594,21 @@ fn list_permission_diff(from: &[String], to: &[String]) -> PermissionListDiff {
     let from: BTreeSet<&str> = from.iter().map(String::as_str).collect();
     let to: BTreeSet<&str> = to.iter().map(String::as_str).collect();
     PermissionListDiff {
-        added: to.difference(&from).map(|value| (*value).to_string()).collect(),
-        removed: from.difference(&to).map(|value| (*value).to_string()).collect(),
+        added: to
+            .difference(&from)
+            .map(|value| (*value).to_string())
+            .collect(),
+        removed: from
+            .difference(&to)
+            .map(|value| (*value).to_string())
+            .collect(),
     }
 }
 
 fn permission_diff(from: &Permissions, to: &Permissions) -> PermissionDiff {
     PermissionDiff {
         network_hosts: list_permission_diff(&from.network_hosts, &to.network_hosts),
-        credential_scopes: list_permission_diff(
-            &from.credential_scopes,
-            &to.credential_scopes,
-        ),
+        credential_scopes: list_permission_diff(&from.credential_scopes, &to.credential_scopes),
         credential_read: PermissionBoolDiff {
             from: from.credential_read,
             to: to.credential_read,
