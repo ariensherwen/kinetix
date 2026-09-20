@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import {
   Kinetix,
+  PluginCatalogEntry,
   PluginDetail,
   PluginPermissionResponse,
   PluginSettingState,
@@ -73,6 +74,7 @@ function prettyCapability(capability: string): string {
 
 export const PluginsView: React.FC = () => {
   const [plugins, setPlugins] = useState<PluginSummary[]>([]);
+  const [catalog, setCatalog] = useState<PluginCatalogEntry[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<PluginDetail | null>(null);
@@ -115,12 +117,14 @@ export const PluginsView: React.FC = () => {
   const refresh = useCallback(async (preferredId?: string | null) => {
     setLoading(true);
     try {
-      const [rows, providerRows] = await Promise.all([
+      const [rows, providerRows, catalogResponse] = await Promise.all([
         Kinetix.plugins(),
         Kinetix.providers(),
+        Kinetix.pluginCatalog(),
       ]);
       setPlugins(rows);
       setProviders(providerRows);
+      setCatalog(catalogResponse.plugins);
       const target = preferredId ?? selectedId;
       if (target && rows.some((plugin) => plugin.id === target)) {
         setSelectedId(target);
@@ -456,6 +460,59 @@ export const PluginsView: React.FC = () => {
               </SketchButton>
             </div>
           </form>
+        </WobblyCard>
+      )}
+
+      {catalog.length > 0 && (
+        <WobblyCard variant="muted" className="p-5">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+              <h3 className="text-xl font-heading font-bold">Discover</h3>
+              <p className="text-sm font-body text-[var(--ink)]/70">
+                Official catalog metadata is discovery-only. Installing a package still goes through
+                Kinetix&apos;s normal package verification and permission-review flow.
+              </p>
+            </div>
+            <SketchBadge variant="blue">Official catalog</SketchBadge>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {catalog.map((entry) => {
+              const installed = plugins.find((plugin) => plugin.id === entry.id);
+              return (
+                <div
+                  key={entry.id}
+                  className="p-4 border-2 border-[var(--ink)]/25 bg-[var(--surface)]"
+                  style={{ borderRadius: '12px 9px 14px 10px / 9px 14px 9px 12px' }}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="font-heading font-bold">{entry.name}</div>
+                      <div className="text-xs font-mono text-[var(--ink)]/55">{entry.publisher}</div>
+                    </div>
+                    <SketchBadge variant={installed ? 'green' : 'default'}>
+                      {installed ? `Installed v${installed.version}` : `v${entry.latest_version}`}
+                    </SketchBadge>
+                  </div>
+
+                  <p className="mt-2 text-sm font-body text-[var(--ink)]/75">{entry.description}</p>
+                  <div className="mt-3 flex flex-wrap gap-1">
+                    {entry.capabilities.map((capability) => (
+                      <code key={capability} className="text-xs bg-[var(--erased)] px-2 py-1">
+                        {capability}
+                      </code>
+                    ))}
+                  </div>
+                  {entry.note && (
+                    <p className="mt-3 text-xs font-body text-[var(--ink)]/60">{entry.note}</p>
+                  )}
+                  <div className="mt-3 text-xs font-mono text-[var(--ink)]/55">
+                    Artifact: {entry.artifact_name}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </WobblyCard>
       )}
 
