@@ -224,11 +224,13 @@ world plugin-auth {
   export auth-flow: interface {
     use types.{plugin-error, auth-result};
     begin: func(
+      flow-name: string,
       redirect-uri: string,
       state: string,
       pkce-challenge: option<string>
     ) -> result<string, plugin-error>;
     exchange: func(
+      flow-name: string,
       code: string,
       redirect-uri: string,
       pkce-verifier: option<string>
