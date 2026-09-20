@@ -216,12 +216,7 @@ impl PluginManager {
         })
     }
 
-    async fn persist_package(
-        &self,
-        plugin_id: &str,
-        sha256: &str,
-        bytes: &[u8],
-    ) -> Result<String> {
+    async fn persist_package(&self, plugin_id: &str, sha256: &str, bytes: &[u8]) -> Result<String> {
         let relative = PathBuf::from(plugin_id).join(format!("{sha256}.kxp"));
         let target = self.inner.package_root.join(&relative);
         let parent = target
