@@ -79,8 +79,29 @@ export interface PluginUiAction {
   description: string;
 }
 
+export interface PluginUiSetting {
+  key: string;
+  label: string;
+  kind: 'text' | 'secret' | 'boolean' | 'select' | string;
+  description: string;
+  required: boolean;
+  options: string[];
+  default?: string | null;
+}
+
 export interface PluginUi {
   actions: PluginUiAction[];
+  settings: PluginUiSetting[];
+}
+
+export interface PluginSettingState extends PluginUiSetting {
+  configured: boolean;
+  value: string | boolean | null;
+}
+
+export interface PluginSettingsResponse {
+  id: string;
+  settings: PluginSettingState[];
 }
 
 export interface PluginPermissions {
@@ -284,6 +305,15 @@ export const Kinetix = {
   pluginPermissions: (id: string) =>
     api.get<PluginPermissionResponse>(
       `/admin/api/plugins/${encodeURIComponent(id)}/permissions`,
+    ),
+  pluginSettings: (id: string) =>
+    api.get<PluginSettingsResponse>(
+      `/admin/api/plugins/${encodeURIComponent(id)}/settings`,
+    ),
+  updatePluginSettings: (id: string, values: Record<string, unknown>) =>
+    api.put<PluginSettingsResponse>(
+      `/admin/api/plugins/${encodeURIComponent(id)}/settings`,
+      { values },
     ),
   installPlugin: (body: PluginInstallInput) =>
     api.post<PluginInstallResult>('/admin/api/plugins/install', body),
