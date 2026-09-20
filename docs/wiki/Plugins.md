@@ -221,6 +221,24 @@ An `auth` action must reference an integration that declares both
 `auth_flow` and `credential_strategy`. The browser never executes guest code
 and never receives the credential returned by the authorization exchange.
 
+### Post-authorization model discovery
+
+An Integration that declares both a `credential_strategy` and `model_source`
+can continue setup after browser authorization without exposing credentials to
+the browser. Before invoking `ModelSource::discover`, Kinetix resolves one
+provider account through the configured credential strategy. Plugins can use
+their own encrypted KV to pass short-lived provider-scoped state between those
+control-plane capabilities.
+
+The bundled Antigravity integration uses this path to call
+`/v1internal:fetchAvailableModels`. After OAuth succeeds, the dashboard receives
+only the non-secret provider id, runs the normal provider discovery endpoint,
+and lets the operator explicitly select models to import.
+
+Models imported from this post-auth flow are created **disabled**, with unknown
+pricing/capability metadata preserved as unknown. They must be reviewed before
+being enabled for routing.
+
 ### Host-owned settings
 
 Plugins may also declare `[[ui.settings]]` fields of kind `text`, `secret`,
