@@ -153,7 +153,7 @@ impl exports::credential_strategy::Guest for Component {
 
         let raw = kinetix::plugin::host_credential::read(&cred_ref)
             .map_err(|e| kinetix_plugin_sdk::helpers::error("credential_expired", e.message))?;
-        let mut cred: Credential = serde_json::from_str(&raw).unwrap_or_default();
+        let mut cred = load_cached_account_credential(&account, &raw);
 
         let now = kinetix_plugin_sdk::helpers::now_unix_millis();
         if !access_token_valid(&cred, now) {
@@ -190,13 +190,14 @@ impl exports::credential_strategy::Guest for Component {
     }
 
     fn health(provider_id: String, account_id: String) -> Result<String, PluginError> {
-        let cred_ref = CredentialRef::Account(AccountRef {
+        let account = AccountRef {
             provider_id,
             account_id,
-        });
+        };
+        let cred_ref = CredentialRef::Account(account.clone());
         let raw = kinetix::plugin::host_credential::read(&cred_ref)
             .map_err(|e| kinetix_plugin_sdk::helpers::error("credential_expired", e.message))?;
-        let cred: Credential = serde_json::from_str(&raw).unwrap_or_default();
+        let cred = load_cached_account_credential(&account, &raw);
         let now = kinetix_plugin_sdk::helpers::now_unix_millis();
         if access_token_valid(&cred, now) {
             Ok("healthy".into())
@@ -216,7 +217,7 @@ impl exports::credential_strategy::Guest for Component {
         let cred_ref = CredentialRef::Account(account.clone());
         let raw = kinetix::plugin::host_credential::read(&cred_ref)
             .map_err(|e| kinetix_plugin_sdk::helpers::error("credential_expired", e.message))?;
-        let mut cred: Credential = serde_json::from_str(&raw).unwrap_or_default();
+        let mut cred = load_cached_account_credential(&account, &raw);
         refresh(&mut cred).map_err(|e| {
             kinetix_plugin_sdk::helpers::retryable_error("upstream_unavailable", e, Some(5))
         })?;
