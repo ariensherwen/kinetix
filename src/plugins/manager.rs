@@ -2073,6 +2073,8 @@ pub fn manifest_summary(row: &PluginRow) -> serde_json::Value {
         "ui": manifest.as_ref().map(|m| m.ui.clone()).unwrap_or_default(),
         "permissions": manifest.as_ref().map(|m| m.permissions.clone()).unwrap_or_default(),
         "limits": manifest.as_ref().map(|m| m.limits.clone()).unwrap_or_default(),
+        "routing_facts_mode": manifest.as_ref().map(|m| m.routing_facts_mode.clone()).unwrap_or_else(|| "pure".into()),
+        "routing_facts_refresh_ms": manifest.as_ref().map(|m| m.routing_facts_refresh_ms).unwrap_or(30_000),
     })
 }
 
