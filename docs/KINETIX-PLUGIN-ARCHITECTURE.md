@@ -193,6 +193,20 @@ Rules:
 - a Route target may mix plugin and native capabilities freely; the plugin never gains visibility
   into sibling targets.
 
+### 6.0.1 User-facing integration descriptors
+
+A plugin may optionally group its low-level capabilities into one or more
+declarative `[[integrations]]` records. An integration has a stable id, display
+name/description, and may reference a provider adapter, credential strategy,
+and/or model source exported by that same plugin.
+
+The host validates every reference against `[provides]` at install time.
+Integration descriptors are presentation/configuration metadata only: they do
+not grant permissions, execute browser code, or alter routing. This gives the
+dashboard a safe vocabulary for presenting "Google Antigravity" instead of
+requiring operators to manually compose `wire_plugin` and
+`credential_plugin` references.
+
 ### 6.1 CredentialStrategy
 
 Purpose:
