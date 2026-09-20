@@ -537,7 +537,6 @@ pub async fn kv_bytes(pool: &Pool, plugin_id: &str) -> Result<u64> {
     Ok(row.get::<i64, _>("n").max(0) as u64)
 }
 
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -545,10 +544,8 @@ mod tests {
     use super::*;
 
     async fn test_store() -> (Pool, Arc<Crypto>, std::path::PathBuf) {
-        let dir = std::env::temp_dir().join(format!(
-            "kinetix-plugin-kv-quota-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("kinetix-plugin-kv-quota-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let url = format!("sqlite://{}?mode=rwc", dir.join("t.db").display());
         let pool = crate::db::connect(&url).await.unwrap();
@@ -601,12 +598,14 @@ mod tests {
         let crypto_a = crypto.clone();
         let crypto_b = crypto.clone();
 
-        let a = tokio::spawn(async move {
-            kv_put_limited(&pool_a, &crypto_a, "p", "a", b"1234", 6).await
-        });
-        let b = tokio::spawn(async move {
-            kv_put_limited(&pool_b, &crypto_b, "p", "b", b"5678", 6).await
-        });
+        let a =
+            tokio::spawn(
+                async move { kv_put_limited(&pool_a, &crypto_a, "p", "a", b"1234", 6).await },
+            );
+        let b =
+            tokio::spawn(
+                async move { kv_put_limited(&pool_b, &crypto_b, "p", "b", b"5678", 6).await },
+            );
 
         let (a, b) = tokio::join!(a, b);
         let results = [a.unwrap(), b.unwrap()];
