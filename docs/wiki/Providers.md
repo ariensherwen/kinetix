@@ -16,6 +16,7 @@ Kinetix has three outbound adapters, selected by the provider's configured
 | `gemini` | Gemini `:streamGenerateContent?alt=sse` | `/models` |
 
 Providers can also bind to external WebAssembly plugin adapters via `wire_plugin` (e.g. `plugin:dev.kinetix.antigravity-oauth/antigravity`).
+For these providers, set `wire_format = "plugin"`; the concrete adapter identity comes from the namespaced `wire_plugin` reference, not from a vendor-specific core wire enum.
 
 Inbound formats are OpenAI Chat Completions and Anthropic Messages. When inbound
 and outbound formats match, Kinetix uses **same-format passthrough** and forwards
