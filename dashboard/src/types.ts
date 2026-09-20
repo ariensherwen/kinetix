@@ -1,4 +1,4 @@
-export type WireFormat = 'openai' | 'anthropic' | 'gemini';
+export type WireFormat = 'openai' | 'anthropic' | 'gemini' | 'plugin';
 
 export interface VirtualKey {
   id: string;
