@@ -203,7 +203,7 @@ async fn rollback_revalidates_retained_package_and_clears_authority() {
 
 #[tokio::test]
 async fn rollback_rejects_tampered_retained_package() {
-    let (m, _pool) = manager().await;
+    let (m, pool) = manager().await;
     let original = build_kxp(GOOD_MANIFEST, EMPTY_COMPONENT);
     let original_outcome = m.install(&original, None, &[], false).await.unwrap();
 
@@ -212,24 +212,14 @@ async fn rollback_rejects_tampered_retained_package() {
         .await
         .unwrap();
 
-    let retained = kinetix::plugins::store::get_package(
-        &m.get("dev.example.foo").await.unwrap().map(|_| ()).and(Some(_pool.clone())).unwrap_or(_pool.clone()),
+    let package = kinetix::plugins::store::get_package(
+        &pool,
         "dev.example.foo",
         &original_outcome.package_sha256,
     )
-    .await;
-
-    // Fetch the provenance from the manager's backing database through a fresh
-    // lookup helper below; the retained file is then corrupted without touching
-    // the provenance hash.
-    drop(retained);
-    let packages = kinetix::plugins::store::list_packages(&_pool, "dev.example.foo")
-        .await
-        .unwrap();
-    let package = packages
-        .iter()
-        .find(|package| package.package_sha256 == original_outcome.package_sha256)
-        .unwrap();
+    .await
+    .unwrap()
+    .unwrap();
     std::fs::write(m.package_root().join(&package.package_path), b"tampered").unwrap();
 
     let err = m
