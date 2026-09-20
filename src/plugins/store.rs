@@ -54,6 +54,18 @@ pub struct PermissionRow {
     pub approved_at: String,
 }
 
+/// Immutable package provenance, retained independently from active plugin state.
+#[derive(Debug, Clone, FromRow, Serialize)]
+pub struct PackageRow {
+    pub plugin_id: String,
+    pub version: String,
+    pub package_sha256: String,
+    pub package_path: String,
+    pub signature: String,
+    pub source: String,
+    pub installed_at: String,
+}
+
 /// A stored circuit-breaker row.
 #[derive(Debug, Clone, FromRow, Serialize)]
 pub struct RuntimeStateRow {
@@ -79,6 +91,7 @@ pub async fn upsert_plugin(
     sha256: &str,
     component: &[u8],
     signature: &str,
+    package_path: &str,
 ) -> Result<()> {
     let manifest_json = serde_json::to_string(&validated.manifest)?;
     let api_major = validated.manifest.api_major().unwrap_or(0) as i64;
@@ -122,6 +135,23 @@ pub async fn upsert_plugin(
         .execute(&mut *tx)
         .await?;
 
+    // Retain immutable package provenance. Reinstalling identical bytes is
+    // idempotent; previous versions remain available for history and rollback.
+    sqlx::query(
+        "INSERT INTO plugin_packages
+         (plugin_id, version, package_sha256, package_path, signature, source, installed_at)
+         VALUES (?,?,?,?,?,'local',?)
+         ON CONFLICT(plugin_id, package_sha256) DO NOTHING",
+    )
+    .bind(&validated.manifest.id)
+    .bind(&validated.manifest.version)
+    .bind(sha256)
+    .bind(package_path)
+    .bind(signature)
+    .bind(&now)
+    .execute(&mut *tx)
+    .await?;
+
     // Ensure a runtime-state row exists.
     sqlx::query(
         "INSERT OR IGNORE INTO plugin_runtime_state (plugin_id, circuit_state, consecutive_failures)
@@ -156,6 +186,17 @@ pub async fn get_plugin(pool: &Pool, id: &str) -> Result<Option<PluginRow>> {
             .fetch_optional(pool)
             .await?,
     )
+}
+
+pub async fn list_packages(pool: &Pool, id: &str) -> Result<Vec<PackageRow>> {
+    Ok(sqlx::query_as::<_, PackageRow>(
+        "SELECT * FROM plugin_packages
+         WHERE plugin_id = ?
+         ORDER BY installed_at DESC, version DESC",
+    )
+    .bind(id)
+    .fetch_all(pool)
+    .await?)
 }
 
 pub async fn set_enabled(pool: &Pool, id: &str, enabled: bool) -> Result<()> {
