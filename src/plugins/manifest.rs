@@ -156,6 +156,62 @@ pub fn validate(manifest: Manifest, policy: HostPolicy) -> Result<ValidatedManif
         }
     }
 
+    let mut ui_setting_keys = std::collections::HashSet::new();
+    for setting in &manifest.ui.settings {
+        validate_ui_id(&setting.key)?;
+        if !ui_setting_keys.insert(setting.key.as_str()) {
+            bail!("duplicate ui setting key '{}'", setting.key);
+        }
+        if setting.label.trim().is_empty() {
+            bail!("ui setting '{}' label must not be empty", setting.key);
+        }
+        if !matches!(setting.kind.as_str(), "text" | "secret" | "boolean" | "select") {
+            bail!(
+                "ui setting '{}' has unsupported kind '{}'",
+                setting.key,
+                setting.kind
+            );
+        }
+        if setting.kind == "select" {
+            if setting.options.is_empty() {
+                bail!("select ui setting '{}' requires options", setting.key);
+            }
+            let mut options = std::collections::HashSet::new();
+            for option in &setting.options {
+                if option.is_empty() || !options.insert(option.as_str()) {
+                    bail!("ui setting '{}' has invalid or duplicate option", setting.key);
+                }
+            }
+            if let Some(default) = &setting.default {
+                if !setting.options.contains(default) {
+                    bail!(
+                        "ui setting '{}' default '{}' is not in options",
+                        setting.key,
+                        default
+                    );
+                }
+            }
+        } else if !setting.options.is_empty() {
+            bail!(
+                "ui setting '{}' options are only valid for select settings",
+                setting.key
+            );
+        }
+        if setting.kind == "boolean" {
+            if let Some(default) = &setting.default {
+                if !matches!(default.as_str(), "true" | "false") {
+                    bail!(
+                        "boolean ui setting '{}' default must be 'true' or 'false'",
+                        setting.key
+                    );
+                }
+            }
+        }
+        if setting.kind == "secret" && setting.default.is_some() {
+            bail!("secret ui setting '{}' may not declare a default", setting.key);
+        }
+    }
+
     let mut ui_action_ids = std::collections::HashSet::new();
     for action in &manifest.ui.actions {
         validate_ui_id(&action.id)?;
@@ -465,6 +521,29 @@ storage = "2MiB"
                 .contains("unknown auth_flow 'missing-login'"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn rejects_invalid_secret_setting_default() {
+        let bad = GOOD.replace(
+            "[[ui.actions]]",
+            "[[ui.settings]]\nkey = \"token\"\nlabel = \"Token\"\nkind = \"secret\"\ndefault = \"bad\"\n\n[[ui.actions]]",
+        );
+        let err = parse_and_validate(&bad, HostPolicy::default()).unwrap_err();
+        assert!(
+            err.to_string().contains("may not declare a default"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn rejects_select_setting_without_options() {
+        let bad = GOOD.replace(
+            "[[ui.actions]]",
+            "[[ui.settings]]\nkey = \"region\"\nlabel = \"Region\"\nkind = \"select\"\n\n[[ui.actions]]",
+        );
+        let err = parse_and_validate(&bad, HostPolicy::default()).unwrap_err();
+        assert!(err.to_string().contains("requires options"), "{err}");
     }
 
     #[test]
