@@ -178,6 +178,14 @@ pub trait HostBacking: Send + Sync {
     async fn kv_get(&self, plugin_id: &str, key: &str) -> Result<Option<Vec<u8>>>;
     async fn kv_put(&self, plugin_id: &str, key: &str, value: &[u8]) -> Result<()>;
     async fn kv_delete(&self, plugin_id: &str, key: &str) -> Result<()>;
+    /// Check whether one of the approved credential scopes authorizes this
+    /// plugin to use credentials belonging to the target provider.
+    async fn credential_scope_allows(
+        &self,
+        plugin_id: &str,
+        provider_id: &str,
+        scopes: &[String],
+    ) -> Result<bool>;
     /// Emit a namespaced, redacted log line (§18).
     fn log(&self, plugin_id: &str, level: &str, message: &str);
     /// Resolve the plaintext secret for a credential ref (§8.1/§8.2). Only
@@ -490,7 +498,11 @@ impl HostCtx {
                 return Err("named credentials are not resolvable in v1".into())
             }
         };
-        if !self.scope_allows(&provider_id) {
+        if !self
+            .scope_allows(&provider_id)
+            .await
+            .map_err(|e| format!("credential scope check failed: {e}"))?
+        {
             return Err(format!("plugin is not scoped to provider '{provider_id}'"));
         }
         let secret = self
@@ -504,11 +516,14 @@ impl HostCtx {
         )))
     }
 
-    fn scope_allows(&self, provider_id: &str) -> bool {
-        let wanted = format!("provider:{provider_id}");
-        self.credential_scopes
-            .iter()
-            .any(|s| s == &wanted || s == "*")
+    async fn scope_allows(&self, provider_id: &str) -> Result<bool> {
+        self.backing
+            .credential_scope_allows(
+                &self.plugin_id,
+                provider_id,
+                &self.credential_scopes,
+            )
+            .await
     }
 }
 
@@ -655,7 +670,11 @@ impl bindings::kinetix::plugin::host_credential::Host for HostCtx {
                 return Ok(Err(err("invalid_configuration", "named credential")));
             }
         };
-        if !self.scope_allows(&provider_id) {
+        let scoped = self
+            .scope_allows(&provider_id)
+            .await
+            .unwrap_or(false);
+        if !scoped {
             return Ok(Err(err(
                 "permission_denied",
                 format!("plugin is not scoped to provider '{provider_id}'"),
