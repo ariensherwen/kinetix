@@ -376,6 +376,11 @@ export const Kinetix = {
     api.post<{ ok: boolean; id: string; provides: PluginCapability[] }>(
       `/admin/api/plugins/${encodeURIComponent(id)}/validate`,
     ),
+  rollbackPlugin: (id: string, sha256: string) =>
+    api.post<PluginInstallResult>(
+      `/admin/api/plugins/${encodeURIComponent(id)}/rollback`,
+      { sha256 },
+    ),
   removePlugin: (id: string) =>
     api.del<{ ok: boolean; id: string }>(
       `/admin/api/plugins/${encodeURIComponent(id)}`,
