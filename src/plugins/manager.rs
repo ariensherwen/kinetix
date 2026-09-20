@@ -2172,6 +2172,67 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    #[test]
+    fn cached_fact_snapshot_rejects_duplicate_and_invalid_values() {
+        let fact = |name: &str, value_json: &str, max_age_ms: Option<u64>| {
+            wit::types::RoutingFact {
+                name: name.into(),
+                value_json: value_json.into(),
+                observed_at: Some("guest-controlled".into()),
+                max_age_ms,
+            }
+        };
+
+        let duplicate = build_cached_fact_snapshot(
+            vec![
+                fact("capacity", "\"burst\"", Some(30_000)),
+                fact("capacity", "\"steady\"", Some(30_000)),
+            ],
+            Default::default(),
+            "2026-09-20T00:00:00Z",
+        )
+        .unwrap_err();
+        assert!(duplicate.message().contains("duplicate cached routing fact"));
+
+        let invalid = build_cached_fact_snapshot(
+            vec![fact("capacity", "{bad", Some(30_000))],
+            Default::default(),
+            "2026-09-20T00:00:00Z",
+        )
+        .unwrap_err();
+        assert!(invalid.message().contains("invalid JSON"));
+
+        let missing_age = build_cached_fact_snapshot(
+            vec![fact("capacity", "true", None)],
+            Default::default(),
+            "2026-09-20T00:00:00Z",
+        )
+        .unwrap_err();
+        assert!(missing_age.message().contains("must declare max_age_ms"));
+    }
+
+    #[test]
+    fn cached_fact_snapshot_host_stamps_guest_observations() {
+        let fact = wit::types::RoutingFact {
+            name: "capacity".into(),
+            value_json: "\"burst\"".into(),
+            observed_at: Some("1900-01-01T00:00:00Z".into()),
+            max_age_ms: Some(30_000),
+        };
+        let snapshot = build_cached_fact_snapshot(
+            vec![fact],
+            Default::default(),
+            "2026-09-20T00:00:00Z",
+        )
+        .unwrap();
+        let envelope: serde_json::Value =
+            serde_json::from_slice(&snapshot[0].1).unwrap();
+        assert_eq!(
+            envelope["observed_at"],
+            serde_json::Value::String("2026-09-20T00:00:00Z".into())
+        );
+    }
+
     #[tokio::test]
     async fn backing_allows_credentials_only_for_matching_strategy_binding() {
         let dir = std::env::temp_dir().join(format!(
