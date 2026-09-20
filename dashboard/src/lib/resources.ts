@@ -101,9 +101,20 @@ export interface PluginPermissionResponse {
   approved: PluginPermissionGrant[];
 }
 
+export interface PluginPackage {
+  plugin_id: string;
+  version: string;
+  package_sha256: string;
+  package_path: string;
+  signature: string;
+  source: string;
+  installed_at: string;
+}
+
 export interface PluginDetail extends PluginSummary {
   permissions_approved?: PluginPermissionGrant[];
   runtime?: Record<string, unknown> | null;
+  packages?: PluginPackage[];
 }
 
 export interface PluginInstallInput {
@@ -116,6 +127,7 @@ export interface PluginInstallInput {
 export interface PluginInstallResult {
   id: string;
   version: string;
+  sha256: string;
   signature: string;
   provides: PluginCapability[];
   enabled: boolean;
