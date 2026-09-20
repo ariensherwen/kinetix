@@ -899,6 +899,112 @@ export const PluginsView: React.FC = () => {
                               </div>
                             );
                           })}
+
+                        {integration.model_source && (
+                          <div className="mt-4 pt-4 border-t border-dashed border-[var(--ink)]/25 space-y-3">
+                            <div>
+                              <div className="text-sm font-heading font-bold">Models</div>
+                              <p className="text-xs font-body text-[var(--ink)]/60">
+                                Discover live models through this integration&apos;s host-mediated model source.
+                              </p>
+                            </div>
+
+                            {providers
+                              .filter(
+                                (provider) =>
+                                  provider.modelSourcePlugin ===
+                                  `plugin:${selected.id}/${integration.model_source}`,
+                              )
+                              .map((provider) => {
+                                const models = discoveredModels[provider.id];
+                                return (
+                                  <div key={provider.id} className="space-y-2">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <SketchButton
+                                        variant="secondary"
+                                        className="gap-2"
+                                        disabled={busy !== null || selected.status !== 'enabled'}
+                                        onClick={() => void discoverIntegrationModels(provider.id)}
+                                      >
+                                        <RefreshCw className="w-4 h-4" />
+                                        {busy === `discover:${provider.id}`
+                                          ? 'Discovering…'
+                                          : `Discover models · ${provider.name}`}
+                                      </SketchButton>
+                                      {models && (
+                                        <SketchBadge variant="blue">
+                                          {models.length} discovered
+                                        </SketchBadge>
+                                      )}
+                                    </div>
+
+                                    {models && models.length === 0 && (
+                                      <p className="text-xs font-mono text-[var(--ink)]/55">
+                                        No models were returned by the integration.
+                                      </p>
+                                    )}
+
+                                    {models && models.length > 0 && (
+                                      <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
+                                        {models.map((model) => (
+                                          <div
+                                            key={model.id}
+                                            className="p-2 border border-[var(--ink)]/20 bg-[var(--surface)] flex items-start justify-between gap-3"
+                                          >
+                                            <div className="min-w-0">
+                                              <div className="text-sm font-heading font-bold truncate">
+                                                {model.display_name || model.id}
+                                              </div>
+                                              <code className="text-xs text-[var(--ink)]/55 break-all">
+                                                {model.id}
+                                              </code>
+                                              {(model.context_window || model.max_output_tokens) && (
+                                                <div className="mt-1 text-xs font-mono text-[var(--ink)]/55">
+                                                  {model.context_window
+                                                    ? `${model.context_window.toLocaleString()} ctx`
+                                                    : 'context unknown'}
+                                                  {' · '}
+                                                  {model.max_output_tokens
+                                                    ? `${model.max_output_tokens.toLocaleString()} max output`
+                                                    : 'output unknown'}
+                                                </div>
+                                              )}
+                                            </div>
+
+                                            {model.already_imported ? (
+                                              <SketchBadge variant="green">Imported</SketchBadge>
+                                            ) : (
+                                              <SketchButton
+                                                variant="primary"
+                                                disabled={busy !== null}
+                                                onClick={() =>
+                                                  void importDiscoveredModel(provider.id, model)
+                                                }
+                                              >
+                                                {busy === `import:${provider.id}:${model.id}`
+                                                  ? 'Importing…'
+                                                  : 'Import'}
+                                              </SketchButton>
+                                            )}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+
+                            {providers.every(
+                              (provider) =>
+                                provider.modelSourcePlugin !==
+                                `plugin:${selected.id}/${integration.model_source}`,
+                            ) && (
+                              <p className="text-xs font-body text-[var(--ink)]/60">
+                                No provider is bound to this integration&apos;s model source yet.
+                              </p>
+                            )}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
