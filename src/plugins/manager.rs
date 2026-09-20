@@ -516,7 +516,7 @@ impl PluginManager {
         let grants = self.ensure_permissions_approved(id, &manifest).await?;
         let limits = manifest::effective_limits(&manifest, self.inner.policy)?;
         // Instantiate to prove the component links against our host API.
-        let mut store = self.new_store(&row, &limits, &grants, false, true);
+        let mut store = self.new_store(&row, &limits, &grants, false, true, "validation");
         let component = self.inner.runtime.compile(&row.component)?;
         let linker = self.inner.runtime.linker()?;
         let _ = self
@@ -880,6 +880,7 @@ impl PluginManager {
         grants: &[PermissionGrant],
         adapter: bool,
         buffered_http_allowed: bool,
+        capability: &str,
     ) -> wasmtime::Store<HostCtx> {
         let manifest = row.manifest().unwrap_or_else(|| Manifest {
             manifest_version: 1,
@@ -915,6 +916,7 @@ impl PluginManager {
 
         let ctx = HostCtx {
             plugin_id: row.id.clone(),
+            capability: capability.to_string(),
             network_hosts,
             allow_private_network: self.inner.policy.allow_private_network,
             credential_read,
@@ -935,7 +937,12 @@ impl PluginManager {
     }
 
     /// Prepare a ready-to-call instance for a plugin.
-    async fn prepare(&self, id: &str, buffered_http_allowed: bool) -> Result<Prepared> {
+    async fn prepare(
+        &self,
+        id: &str,
+        buffered_http_allowed: bool,
+        capability: &str,
+    ) -> Result<Prepared> {
         let row = self
             .get(id)
             .await?
@@ -951,7 +958,7 @@ impl PluginManager {
         let limits = manifest::effective_limits(&manifest, self.inner.policy)?;
         let component = self.inner.runtime.compile(&row.component)?;
         let linker = self.inner.runtime.linker()?;
-        let mut store = self.new_store(&row, &limits, &grants, false, buffered_http_allowed);
+        let mut store = self.new_store(&row, &limits, &grants, false, buffered_http_allowed, capability);
         let plugin = self
             .inner
             .runtime
@@ -982,7 +989,7 @@ impl PluginManager {
         let limits = manifest::effective_limits(&manifest, self.inner.policy)?;
         let component = self.inner.runtime.compile(&row.component)?;
         let linker = self.inner.runtime.linker()?;
-        let mut store = self.new_store(&row, &limits, &grants, false, true);
+        let mut store = self.new_store(&row, &limits, &grants, false, true, "auth_flow");
         let plugin = self
             .inner
             .runtime
@@ -1010,7 +1017,7 @@ impl PluginManager {
                 "plugin '{id}' does not provide auth flow '{flow_name}'"
             )));
         }
-        self.bump_invocation();
+        let started = self.bump_invocation(id, "auth_flow");
         let _permits = self.acquire_invocation_permits(id).await;
         let mut prepared = self
             .prepare_auth(id)
@@ -1031,7 +1038,7 @@ impl PluginManager {
             .await
             .map_err(map_call_error)
             .and_then(map_auth_result);
-        self.settle(id, result).await
+        self.settle(id, "auth_flow", started, result).await
     }
 
     /// Exchange a browser callback code for host-persistable credential JSON.
@@ -1051,7 +1058,7 @@ impl PluginManager {
                 "plugin '{id}' does not provide auth flow '{flow_name}'"
             )));
         }
-        self.bump_invocation();
+        let started = self.bump_invocation(id, "auth_flow");
         let _permits = self.acquire_invocation_permits(id).await;
         let mut prepared = self
             .prepare_auth(id)
@@ -1072,7 +1079,7 @@ impl PluginManager {
             .await
             .map_err(map_call_error)
             .and_then(map_auth_result);
-        self.settle(id, result).await
+        self.settle(id, "auth_flow", started, result).await
     }
 
     // -----------------------------------------------------------------------
@@ -1101,7 +1108,7 @@ impl PluginManager {
         let limits = manifest::effective_limits(&manifest, self.inner.policy)?;
         let component = self.inner.runtime.compile(&row.component)?;
         let linker = self.inner.runtime.linker()?;
-        let mut store = self.new_store(&row, &limits, &grants, true, false);
+        let mut store = self.new_store(&row, &limits, &grants, true, false, "provider_adapter");
         let plugin = self
             .inner
             .runtime
@@ -1116,7 +1123,7 @@ impl PluginManager {
     }
 
     pub async fn adapter_wire_format(&self, id: &str) -> Result<String, PluginFault> {
-        self.bump_invocation();
+        let started = self.bump_invocation(id, "provider_adapter");
         let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
             .prepare_adapter(id)
@@ -1130,7 +1137,7 @@ impl PluginManager {
             .call_wire_format(&mut p.store)
             .await
             .map_err(map_call_error);
-        self.settle_cancellable(id, &guard, res).await
+        self.settle_cancellable(id, "provider_adapter", started, &guard, res).await
     }
 
     pub async fn adapter_build_url(
@@ -1139,7 +1146,7 @@ impl PluginManager {
         provider_json: &str,
         model_json: &str,
     ) -> Result<String, PluginFault> {
-        self.bump_invocation();
+        let started = self.bump_invocation(id, "provider_adapter");
         let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
             .prepare_adapter(id)
@@ -1154,7 +1161,7 @@ impl PluginManager {
             .await
             .map_err(map_call_error)
             .and_then(map_adapter_result);
-        self.settle_cancellable(id, &guard, res).await
+        self.settle_cancellable(id, "provider_adapter", started, &guard, res).await
     }
 
     pub async fn adapter_apply_auth(
@@ -1163,7 +1170,7 @@ impl PluginManager {
         provider_json: &str,
         credential: &str,
     ) -> Result<String, PluginFault> {
-        self.bump_invocation();
+        let started = self.bump_invocation(id, "provider_adapter");
         let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
             .prepare_adapter(id)
@@ -1178,7 +1185,7 @@ impl PluginManager {
             .await
             .map_err(map_call_error)
             .and_then(map_adapter_result);
-        self.settle_cancellable(id, &guard, res).await
+        self.settle_cancellable(id, "provider_adapter", started, &guard, res).await
     }
 
     pub async fn adapter_build_body(
@@ -1188,7 +1195,7 @@ impl PluginManager {
         provider_json: &str,
         model_json: &str,
     ) -> Result<String, PluginFault> {
-        self.bump_invocation();
+        let started = self.bump_invocation(id, "provider_adapter");
         let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
             .prepare_adapter(id)
@@ -1203,7 +1210,7 @@ impl PluginManager {
             .await
             .map_err(map_call_error)
             .and_then(map_adapter_result);
-        self.settle_cancellable(id, &guard, res).await
+        self.settle_cancellable(id, "provider_adapter", started, &guard, res).await
     }
 
     pub async fn adapter_classify_error(
@@ -1213,7 +1220,7 @@ impl PluginManager {
         body: &str,
         headers_json: &str,
     ) -> Result<String, PluginFault> {
-        self.bump_invocation();
+        let started = self.bump_invocation(id, "provider_adapter");
         let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
             .prepare_adapter(id)
@@ -1228,7 +1235,7 @@ impl PluginManager {
             .await
             .map_err(map_call_error)
             .and_then(map_adapter_result);
-        self.settle_cancellable(id, &guard, res).await
+        self.settle_cancellable(id, "provider_adapter", started, &guard, res).await
     }
 
     pub async fn adapter_parse_stream_chunk(
@@ -1236,7 +1243,7 @@ impl PluginManager {
         id: &str,
         data: &str,
     ) -> Result<String, PluginFault> {
-        self.bump_invocation();
+        let started = self.bump_invocation(id, "provider_adapter");
         let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
             .prepare_adapter(id)
@@ -1251,7 +1258,7 @@ impl PluginManager {
             .await
             .map_err(map_call_error)
             .and_then(map_adapter_result);
-        self.settle_cancellable(id, &guard, res).await
+        self.settle_cancellable(id, "provider_adapter", started, &guard, res).await
     }
 
     pub async fn adapter_parse_full_response(
@@ -1259,7 +1266,7 @@ impl PluginManager {
         id: &str,
         body_json: &str,
     ) -> Result<String, PluginFault> {
-        self.bump_invocation();
+        let started = self.bump_invocation(id, "provider_adapter");
         let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
             .prepare_adapter(id)
@@ -1274,7 +1281,7 @@ impl PluginManager {
             .await
             .map_err(map_call_error)
             .and_then(map_adapter_result);
-        self.settle_cancellable(id, &guard, res).await
+        self.settle_cancellable(id, "provider_adapter", started, &guard, res).await
     }
 
     /// Record a successful invocation, closing the breaker.
@@ -1324,10 +1331,10 @@ impl PluginManager {
         account_id: &str,
         account_label: &str,
     ) -> Result<wit::types::CredentialLease, PluginFault> {
-        self.bump_invocation();
+        let started = self.bump_invocation(id, "credential_strategy");
         let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
-            .prepare(id, true)
+            .prepare(id, true, "credential_strategy")
             .await
             .map_err(|e| PluginFault::Internal(e.to_string()))?;
         let plugin = p.plugin;
@@ -1339,7 +1346,7 @@ impl PluginManager {
             .await
             .map_err(map_call_error)
             .and_then(map_plugin_result);
-        self.settle(id, res).await
+        self.settle(id, "credential_strategy", started, res).await
     }
 
     /// ModelSource::discover (§6.2).
@@ -1350,10 +1357,10 @@ impl PluginManager {
         base_url: &str,
         models_path: &str,
     ) -> Result<Vec<wit::types::DiscoveredModel>, PluginFault> {
-        self.bump_invocation();
+        let started = self.bump_invocation(id, "model_source");
         let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
-            .prepare(id, true)
+            .prepare(id, true, "model_source")
             .await
             .map_err(|e| PluginFault::Internal(e.to_string()))?;
         let plugin = p.plugin;
@@ -1365,7 +1372,7 @@ impl PluginManager {
             .await
             .map_err(map_call_error)
             .and_then(map_plugin_result);
-        self.settle(id, res).await
+        self.settle(id, "model_source", started, res).await
     }
 
     /// HealthProbe::probe (§6.5).
@@ -1375,10 +1382,10 @@ impl PluginManager {
         provider_id: &str,
         account_id: &str,
     ) -> Result<wit::types::HealthObservation, PluginFault> {
-        self.bump_invocation();
+        let started = self.bump_invocation(id, "health_probe");
         let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
-            .prepare(id, true)
+            .prepare(id, true, "health_probe")
             .await
             .map_err(|e| PluginFault::Internal(e.to_string()))?;
         let plugin = p.plugin;
@@ -1390,7 +1397,7 @@ impl PluginManager {
             .await
             .map_err(map_call_error)
             .and_then(map_plugin_result);
-        self.settle(id, res).await
+        self.settle(id, "health_probe", started, res).await
     }
 
     /// RoutingFacts::facts (§6.4). `request_json` must carry only request/config
@@ -1403,10 +1410,10 @@ impl PluginManager {
         request_json: &str,
         cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> Result<Vec<wit::types::RoutingFact>, PluginFault> {
-        self.bump_invocation();
+        let started = self.bump_invocation(id, "routing_facts");
         let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
-            .prepare(id, false)
+            .prepare(id, false, "routing_facts")
             .await
             .map_err(|e| PluginFault::Internal(e.to_string()))?;
         let plugin = p.plugin;
@@ -1420,7 +1427,7 @@ impl PluginManager {
             .map_err(map_call_error)
             .and_then(map_plugin_result);
         watchdog.abort();
-        self.settle_cancellable(id, &guard, res).await
+        self.settle_cancellable(id, "routing_facts", started, &guard, res).await
     }
 
     /// RoutingFacts::facts (§6.4). `request_json` must carry only request/config
@@ -1430,10 +1437,10 @@ impl PluginManager {
         id: &str,
         request_json: &str,
     ) -> Result<Vec<wit::types::RoutingFact>, PluginFault> {
-        self.bump_invocation();
+        let started = self.bump_invocation(id, "routing_facts");
         let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
-            .prepare(id, false)
+            .prepare(id, false, "routing_facts")
             .await
             .map_err(|e| PluginFault::Internal(e.to_string()))?;
         let plugin = p.plugin;
@@ -1445,7 +1452,7 @@ impl PluginManager {
             .await
             .map_err(map_call_error)
             .and_then(map_plugin_result);
-        self.settle(id, res).await
+        self.settle(id, "routing_facts", started, res).await
     }
 
     /// Read-only hook: on_request_normalized (§6.6).
@@ -1454,10 +1461,10 @@ impl PluginManager {
         id: &str,
         request_json: &str,
     ) -> Result<(), PluginFault> {
-        self.bump_invocation();
+        let started = self.bump_invocation(id, "hook.on_request_normalized");
         let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
-            .prepare(id, true)
+            .prepare(id, true, "hook.on_request_normalized")
             .await
             .map_err(|e| PluginFault::Internal(e.to_string()))?;
         let plugin = p.plugin;
@@ -1469,7 +1476,7 @@ impl PluginManager {
             .await
             .map_err(map_call_error)
             .and_then(map_plugin_result);
-        self.settle(id, res).await
+        self.settle(id, "hook.on_request_normalized", started, res).await
     }
 
     /// Read-only hook: on_target_candidate (§6.6).
@@ -1478,10 +1485,10 @@ impl PluginManager {
         id: &str,
         target_json: &str,
     ) -> Result<(), PluginFault> {
-        self.bump_invocation();
+        let started = self.bump_invocation(id, "hook.on_target_candidate");
         let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
-            .prepare(id, true)
+            .prepare(id, true, "hook.on_target_candidate")
             .await
             .map_err(|e| PluginFault::Internal(e.to_string()))?;
         let plugin = p.plugin;
@@ -1493,7 +1500,7 @@ impl PluginManager {
             .await
             .map_err(map_call_error)
             .and_then(map_plugin_result);
-        self.settle(id, res).await
+        self.settle(id, "hook.on_target_candidate", started, res).await
     }
 
     /// Fire-and-forget hook: on_usage_finalized (§6.6). Runs off the request
@@ -1503,10 +1510,10 @@ impl PluginManager {
         id: &str,
         usage_json: &str,
     ) -> Result<(), PluginFault> {
-        self.bump_invocation();
+        let started = self.bump_invocation(id, "hook.on_usage_finalized");
         let _permits = self.acquire_invocation_permits(id).await;
         let mut p = self
-            .prepare(id, true)
+            .prepare(id, true, "hook.on_usage_finalized")
             .await
             .map_err(|e| PluginFault::Internal(e.to_string()))?;
         let plugin = p.plugin;
@@ -1518,7 +1525,7 @@ impl PluginManager {
             .await
             .map_err(map_call_error)
             .and_then(map_plugin_result);
-        self.settle(id, res).await
+        self.settle(id, "hook.on_usage_finalized", started, res).await
     }
 
     /// Validate an installed plugin by instantiating it (§11 self-check).
@@ -1534,7 +1541,7 @@ impl PluginManager {
         let component = self.inner.runtime.compile(&row.component)?;
         let linker = self.inner.runtime.linker()?;
         // Validation proves linking with no runtime authority granted.
-        let mut store = self.new_store(&row, &limits, &[], false, false);
+        let mut store = self.new_store(&row, &limits, &[], false, false, "validation");
         let _ = self
             .inner
             .runtime
