@@ -441,6 +441,14 @@ async fn resolve_plugin_destination(
 
     addrs.sort_unstable();
     addrs.dedup();
+    validate_plugin_destination_addrs(host, addrs, allow_private_network)
+}
+
+fn validate_plugin_destination_addrs(
+    host: &str,
+    addrs: Vec<std::net::SocketAddr>,
+    allow_private_network: bool,
+) -> Result<Vec<std::net::SocketAddr>, PluginEgressError> {
     if addrs.is_empty() {
         return Err(PluginEgressError::Unavailable(format!(
             "DNS resolution for '{host}' returned no addresses"
@@ -944,6 +952,88 @@ mod tests {
             backing: std::sync::Arc::new(NoBacking),
             limits: wasmtime::StoreLimitsBuilder::new().build(),
         }
+    }
+
+    #[test]
+    fn plugin_egress_rejects_private_and_mixed_dns_answers() {
+        use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+
+        let public = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 443);
+        assert!(validate_plugin_destination_addrs("public.example", vec![public], false).is_ok());
+
+        let private = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), 443);
+        assert!(matches!(
+            validate_plugin_destination_addrs("private.example", vec![private], false),
+            Err(PluginEgressError::Denied(_))
+        ));
+        assert!(matches!(
+            validate_plugin_destination_addrs(
+                "rebind.example",
+                vec![public, private],
+                false,
+            ),
+            Err(PluginEgressError::Denied(_))
+        ));
+
+        let ula = SocketAddr::new(
+            IpAddr::V6("fd00::1".parse::<Ipv6Addr>().unwrap()),
+            443,
+        );
+        let link_local = SocketAddr::new(
+            IpAddr::V6("fe80::1".parse::<Ipv6Addr>().unwrap()),
+            443,
+        );
+        let mapped_loopback = SocketAddr::new(
+            IpAddr::V6("::ffff:127.0.0.1".parse::<Ipv6Addr>().unwrap()),
+            443,
+        );
+        for address in [ula, link_local, mapped_loopback] {
+            assert!(matches!(
+                validate_plugin_destination_addrs("ipv6.example", vec![address], false),
+                Err(PluginEgressError::Denied(_))
+            ));
+        }
+
+        assert!(validate_plugin_destination_addrs(
+            "dev-private.example",
+            vec![private],
+            true,
+        )
+        .is_ok());
+    }
+
+    #[tokio::test]
+    async fn plugin_http_rejects_private_literals_before_connecting() {
+        use bindings::kinetix::plugin::host_http::Host;
+
+        let req = wit::types::HttpRequest {
+            method: "GET".into(),
+            url: "https://127.0.0.1/metadata".into(),
+            headers: vec![],
+            body: vec![],
+            credential: None,
+        };
+        let mut ctx = test_ctx(true, vec!["127.0.0.1".into()]);
+        let error = ctx.send(req).await.unwrap().unwrap_err();
+        assert_eq!(error.code, "permission_denied");
+        assert!(error.message.contains("blocked private/reserved"));
+    }
+
+    #[tokio::test]
+    async fn plugin_http_rejects_host_header_override() {
+        use bindings::kinetix::plugin::host_http::Host;
+
+        let req = wit::types::HttpRequest {
+            method: "GET".into(),
+            url: "https://api.example.com/".into(),
+            headers: vec![("Host".into(), "metadata.google.internal".into())],
+            body: vec![],
+            credential: None,
+        };
+        let mut ctx = test_ctx(true, vec!["api.example.com".into()]);
+        let error = ctx.send(req).await.unwrap().unwrap_err();
+        assert_eq!(error.code, "permission_denied");
+        assert!(error.message.contains("Host header"));
     }
 
     #[tokio::test]
