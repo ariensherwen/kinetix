@@ -974,7 +974,7 @@ impl PluginManager {
     ) -> Result<
         crate::plugins::runtime::auth_bindings::kinetix::plugin::types::AuthResult,
         PluginFault,
-    >{
+    > {
         if !self.provides(id, Capability::AuthFlow, flow_name).await {
             return Err(PluginFault::InvalidResult(format!(
                 "plugin '{id}' does not provide auth flow '{flow_name}'"
@@ -1305,7 +1305,7 @@ impl PluginManager {
     ) -> Result<
         Vec<crate::plugins::runtime::model_source_v2_bindings::kinetix::plugin::types::DiscoveredModel>,
         PluginFault,
-    > {
+    >{
         if !self
             .provides(id, Capability::ModelSourceV2, source_name)
             .await
