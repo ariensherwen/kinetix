@@ -99,6 +99,9 @@ jobs:
         with:
           shared-key: plugin-abi
 
+      - name: Verify SDK WIT matches host WIT
+        run: cmp --silent wit/kinetix-plugin.wit plugins/sdk/wit/kinetix-plugin.wit
+
       - name: Check plugin SDK
         run: cargo check --manifest-path plugins/sdk/Cargo.toml
 
