@@ -368,9 +368,22 @@ manifest and enforced by the host:
 
 - **pure:** the routing-facts world does not import `host-http`; facts are derived only from the
   request/config facts core already provides, and evaluation is a side-effect-free function; or
-- **cached:** the plugin computes facts on a background schedule and the request path only reads the
-  last published snapshot. Each fact carries an `observed_at`; a fact older than its declared
-  `max_age` evaluates as `unknown`.
+- **cached:** Kinetix invokes the plugin off the request path at the manifest's
+  `routing_facts_refresh_ms` cadence (default 30 seconds; accepted range 5 seconds to 1 hour).
+  This invocation may use approved buffered `host-http`. Facts returned from `facts(...)` and
+  values published through `host-storage.cache-set` are buffered for that invocation, validated,
+  host-stamped, and atomically replace the previous `_cache:` snapshot under the plugin's storage
+  quota. Direct guest writes/deletes to `_cache:` are rejected. The request path never invokes the
+  guest for cached mode; it only reads that committed snapshot.
+
+Every cached fact must declare `max_age_ms` in the range 1 ms to 24 hours. Guest-supplied
+`observed_at` is ignored; Kinetix stamps the successful refresh time. A failed, timed-out,
+invalid, or quota-exceeded refresh leaves the previous complete snapshot untouched. Once a fact
+exceeds its `max_age_ms`, it is omitted from request facts and therefore evaluates as `unknown`.
+
+Cached refreshes run concurrently across plugins, but normal global/per-plugin invocation limits,
+circuit breakers, network allow-lists, DNS pinning, body/request budgets, and wall-time limits remain
+in force. The host-owned observability capability label is `routing_facts.refresh`.
 
 In both models a fact that is missing, failed, or stale is recorded in the Route Trace as `unknown`
 **with the reason** (timeout, plugin fault, no observation), so explainability does not degrade
