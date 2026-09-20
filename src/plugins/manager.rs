@@ -867,6 +867,35 @@ impl PluginManager {
         })
     }
 
+    /// Instantiate the optional credential-aware model-source world.
+    async fn prepare_model_source_v2(&self, id: &str) -> Result<ModelSourceV2Prepared> {
+        let row = self
+            .get(id)
+            .await?
+            .ok_or_else(|| anyhow!("plugin '{id}' is not installed"))?;
+        if !row.status().is_enabled() {
+            bail!("plugin '{id}' is not enabled");
+        }
+        let manifest = row
+            .manifest()
+            .ok_or_else(|| anyhow!("plugin '{id}' has an unreadable manifest"))?;
+        let grants = self.ensure_permissions_approved(id, &manifest).await?;
+        let limits = manifest::effective_limits(&manifest, self.inner.policy)?;
+        let component = self.inner.runtime.compile(&row.component)?;
+        let linker = self.inner.runtime.linker()?;
+        let mut store = self.new_store(&row, &limits, &grants, false, true);
+        let plugin = self
+            .inner
+            .runtime
+            .instantiate_model_source_v2(&linker, &mut store, &component)
+            .await?;
+        Ok(ModelSourceV2Prepared {
+            store,
+            plugin,
+            wall_time: Duration::from_millis(limits.wall_time_ms),
+        })
+    }
+
     /// Instantiate the optional account-authorization world for one call.
     async fn prepare_auth(&self, id: &str) -> Result<AuthPrepared> {
         let row = self
@@ -1262,6 +1291,65 @@ impl PluginManager {
         self.settle(id, res).await
     }
 
+    /// Credential-aware ModelSource v2 discovery. Core selects the account;
+    /// the guest receives only provider/account identifiers and must use the
+    /// host credential capability for secret access.
+    pub async fn model_discover_v2(
+        &self,
+        id: &str,
+        provider_id: &str,
+        account_id: &str,
+        base_url: &str,
+        models_path: &str,
+    ) -> Result<
+        Vec<crate::plugins::runtime::model_source_v2_bindings::kinetix::plugin::types::DiscoveredModel>,
+        PluginFault,
+    > {
+        if !self
+            .provides(id, Capability::ModelSourceV2, "")
+            .await
+        {
+            // Name-specific validation is performed by the caller's binding
+            // resolution; this guard only ensures the plugin declares v2.
+            let row = self
+                .get(id)
+                .await
+                .map_err(|e| PluginFault::Internal(e.to_string()))?
+                .ok_or_else(|| PluginFault::InvalidResult(format!("plugin '{id}' is not installed")))?;
+            let has_v2 = row
+                .manifest()
+                .map(|m| !m.provides.model_sources_v2.is_empty())
+                .unwrap_or(false);
+            if !has_v2 {
+                return Err(PluginFault::InvalidResult(format!(
+                    "plugin '{id}' does not provide credential-aware model discovery"
+                )));
+            }
+        }
+        self.bump_invocation();
+        let _permit = self.inner.semaphore.acquire().await;
+        let mut p = self
+            .prepare_model_source_v2(id)
+            .await
+            .map_err(|e| PluginFault::Internal(e.to_string()))?;
+        let plugin = p.plugin;
+        let rt = self.inner.runtime.clone();
+        let _guard = rt.arm_deadline(&mut p.store, Duration::from_secs(30));
+        let res = plugin
+            .model_source_v2()
+            .call_discover(
+                &mut p.store,
+                provider_id,
+                account_id,
+                base_url,
+                models_path,
+            )
+            .await
+            .map_err(map_call_error)
+            .and_then(map_model_source_v2_result);
+        self.settle(id, res).await
+    }
+
     /// HealthProbe::probe (§6.5).
     pub async fn health_probe(
         &self,
@@ -1518,6 +1606,12 @@ struct Prepared {
     wall_time: Duration,
 }
 
+struct ModelSourceV2Prepared {
+    store: wasmtime::Store<HostCtx>,
+    plugin: crate::plugins::runtime::model_source_v2_bindings::PluginModelSourceV2,
+    wall_time: Duration,
+}
+
 struct AuthPrepared {
     store: wasmtime::Store<HostCtx>,
     plugin: crate::plugins::runtime::auth_bindings::PluginAuth,
@@ -1543,6 +1637,20 @@ fn map_call_error(e: wasmtime::Error) -> PluginFault {
 /// Map the guest's `Result<T, PluginError>` into a [`PluginFault`].
 fn map_plugin_result<T>(r: Result<T, wit::types::PluginError>) -> Result<T, PluginFault> {
     r.map_err(|e| PluginFault::PluginError {
+        code: e.code,
+        message: e.message,
+        retryable: e.retryable,
+    })
+}
+
+/// Map the credential-aware model-source world's generated error type.
+fn map_model_source_v2_result<T>(
+    result: Result<
+        T,
+        crate::plugins::runtime::model_source_v2_bindings::kinetix::plugin::types::PluginError,
+    >,
+) -> Result<T, PluginFault> {
+    result.map_err(|e| PluginFault::PluginError {
         code: e.code,
         message: e.message,
         retryable: e.retryable,
