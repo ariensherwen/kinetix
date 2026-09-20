@@ -156,6 +156,42 @@ pub fn validate(manifest: Manifest, policy: HostPolicy) -> Result<ValidatedManif
         }
     }
 
+    let mut ui_action_ids = std::collections::HashSet::new();
+    for action in &manifest.ui.actions {
+        validate_ui_id(&action.id)?;
+        if !ui_action_ids.insert(action.id.as_str()) {
+            bail!("duplicate ui action id '{}'", action.id);
+        }
+        if action.label.trim().is_empty() {
+            bail!("ui action '{}' label must not be empty", action.id);
+        }
+        if action.kind != "auth" {
+            bail!(
+                "ui action '{}' has unsupported kind '{}': expected 'auth'",
+                action.id,
+                action.kind
+            );
+        }
+        let integration = manifest
+            .integrations
+            .iter()
+            .find(|integration| integration.id == action.integration)
+            .ok_or_else(|| {
+                anyhow!(
+                    "ui action '{}' references unknown integration '{}'",
+                    action.id,
+                    action.integration
+                )
+            })?;
+        if integration.auth_flow.is_none() || integration.credential_strategy.is_none() {
+            bail!(
+                "auth ui action '{}' requires integration '{}' to declare auth_flow and credential_strategy",
+                action.id,
+                action.integration
+            );
+        }
+    }
+
     for host in &manifest.permissions.network_hosts {
         validate_network_host(host)?;
     }
@@ -224,6 +260,19 @@ fn validate_id(id: &str) -> Result<()> {
     }
     if id.starts_with('.') || id.ends_with('.') || id.contains("..") {
         bail!("plugin id '{id}' has an invalid dot placement");
+    }
+    Ok(())
+}
+
+fn validate_ui_id(id: &str) -> Result<()> {
+    if id.is_empty() || id.len() > 64 {
+        bail!("ui action id must be 1..=64 characters");
+    }
+    let ok = id
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_');
+    if !ok {
+        bail!("ui action id '{id}' may only contain lowercase letters, digits, '-', '_'");
     }
     Ok(())
 }
@@ -309,13 +358,23 @@ version = "1.2.0"
 plugin_api = "1"
 
 [provides]
+credential_strategies = ["foo-auth"]
+auth_flows = ["foo-login"]
 model_sources = ["foo-models"]
 
 [[integrations]]
 id = "foo"
 name = "Foo Cloud"
 description = "Foo provider integration"
+credential_strategy = "foo-auth"
+auth_flow = "foo-login"
 model_source = "foo-models"
+
+[[ui.actions]]
+id = "connect"
+label = "Connect account"
+kind = "auth"
+integration = "foo"
 
 [permissions]
 network_hosts = ["api.foo.example", "*.svc.example"]
@@ -342,7 +401,10 @@ storage = "2MiB"
 
     #[test]
     fn rejects_no_capabilities() {
-        let bad = GOOD.replace("model_sources = [\"foo-models\"]", "");
+        let bad = GOOD
+            .replace("credential_strategies = [\"foo-auth\"]", "")
+            .replace("auth_flows = [\"foo-login\"]", "")
+            .replace("model_sources = [\"foo-models\"]", "");
         assert!(parse_and_validate(&bad, HostPolicy::default()).is_err());
     }
 
@@ -374,7 +436,10 @@ storage = "2MiB"
 
     #[test]
     fn rejects_empty_integration_binding() {
-        let bad = GOOD.replace("model_source = \"foo-models\"", "");
+        let bad = GOOD
+            .replace("credential_strategy = \"foo-auth\"", "")
+            .replace("auth_flow = \"foo-login\"", "")
+            .replace("model_source = \"foo-models\"", "");
         let err = parse_and_validate(&bad, HostPolicy::default()).unwrap_err();
         assert!(
             err.to_string()
@@ -398,6 +463,27 @@ storage = "2MiB"
         assert!(
             err.to_string()
                 .contains("unknown auth_flow 'missing-login'"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn rejects_ui_action_with_unknown_integration() {
+        let bad = GOOD.replace("integration = \"foo\"", "integration = \"missing\"");
+        let err = parse_and_validate(&bad, HostPolicy::default()).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("references unknown integration 'missing'"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn rejects_unsupported_ui_action_kind() {
+        let bad = GOOD.replace("kind = \"auth\"", "kind = \"script\"");
+        let err = parse_and_validate(&bad, HostPolicy::default()).unwrap_err();
+        assert!(
+            err.to_string().contains("unsupported kind 'script'"),
             "{err}"
         );
     }
