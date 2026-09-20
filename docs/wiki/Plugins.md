@@ -312,6 +312,26 @@ packages.
 Do not set an entry `installable = true` until the signed release asset exists
 and its exact SHA-256 and redirect hosts have been committed to the catalog.
 
+## Version history and rollback
+
+Kinetix retains accepted package bytes independently from the active plugin row.
+The dashboard shows every retained version, its SHA-256, provenance source, and
+which package is currently active.
+
+Rolling back is deliberately a reactivation, not a pointer swap:
+
+1. resolve the retained package by plugin id + SHA-256;
+2. reject invalid/escaping package paths;
+3. read the exact retained `.kxp`;
+4. recompute and verify its SHA-256;
+5. re-parse and validate the manifest id/version;
+6. recompile the WebAssembly component;
+7. activate it through the normal plugin upsert path.
+
+The reactivated package is always **disabled** and all permission grants are
+cleared. An operator must review and approve the rolled-back manifest before it
+can be enabled again.
+
 ## Operating Plugins
 
 ### CLI Workflow
