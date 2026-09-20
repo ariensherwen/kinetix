@@ -933,11 +933,7 @@ mod tests {
             .await
             .unwrap()
             .is_err());
-        assert!(ctx
-            .delete("_cache:direct".into())
-            .await
-            .unwrap()
-            .is_err());
+        assert!(ctx.delete("_cache:direct".into()).await.unwrap().is_err());
         assert!(ctx
             .cache_set("capacity".into(), "true".into(), 30_000)
             .await
