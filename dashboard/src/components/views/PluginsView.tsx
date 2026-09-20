@@ -372,6 +372,24 @@ export const PluginsView: React.FC = () => {
     }
   };
 
+  const setupAndConnect = async (
+    pluginId: string,
+    integrationId: string,
+    flowName: string,
+  ) => {
+    setBusy(`setup:${integrationId}`);
+    setError(null);
+    setNotice(null);
+    try {
+      const provider = await Kinetix.setupPluginIntegrationProvider(pluginId, integrationId);
+      const started = await Kinetix.startPluginAuth(pluginId, flowName, provider.id);
+      window.location.assign(started.authorize_url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setBusy(null);
+    }
+  };
+
   const connectAccount = async (
     pluginId: string,
     flowName: string,
@@ -792,15 +810,44 @@ export const PluginsView: React.FC = () => {
                                     {action.label} · {provider.name}
                                   </SketchButton>
                                 ))}
-                                {compatibleProviders.length === 0 && (
-                                  <p className="text-xs font-body text-[var(--ink)]/60">
-                                    Bind a provider&apos;s credential plugin to{' '}
-                                    <code>
-                                      plugin:{selected.id}/{integration.credential_strategy}
-                                    </code>{' '}
-                                    before using “{action.label}”.
-                                  </p>
-                                )}
+                                {compatibleProviders.length === 0 &&
+                                  (integration.provider ? (
+                                    <div className="space-y-2">
+                                      <div className="text-xs font-mono text-[var(--ink)]/55 break-all">
+                                        {integration.provider.base_url}
+                                      </div>
+                                      <SketchButton
+                                        variant="primary"
+                                        className="gap-2"
+                                        disabled={busy !== null || selected.status !== 'enabled'}
+                                        onClick={() =>
+                                          void setupAndConnect(
+                                            selected.id,
+                                            integration.id,
+                                            integration.auth_flow!,
+                                          )
+                                        }
+                                      >
+                                        <LogIn className="w-4 h-4" />
+                                        {busy === `setup:${integration.id}`
+                                          ? 'Setting up…'
+                                          : `Set up & ${action.label.toLowerCase()}`}
+                                      </SketchButton>
+                                      <p className="text-xs font-body text-[var(--ink)]/60">
+                                        Kinetix will create the provider from the plugin&apos;s
+                                        validated defaults, bind only this integration&apos;s
+                                        capabilities, then start the authorization flow.
+                                      </p>
+                                    </div>
+                                  ) : (
+                                    <p className="text-xs font-body text-[var(--ink)]/60">
+                                      Bind a provider&apos;s credential plugin to{' '}
+                                      <code>
+                                        plugin:{selected.id}/{integration.credential_strategy}
+                                      </code>{' '}
+                                      before using “{action.label}”.
+                                    </p>
+                                  ))}
                               </div>
                             );
                           })}
