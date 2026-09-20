@@ -1317,13 +1317,7 @@ impl PluginManager {
             };
         let result = plugin
             .account_model_source()
-            .call_discover(
-                &mut p.store,
-                provider_id,
-                &account,
-                base_url,
-                models_path,
-            )
+            .call_discover(&mut p.store, provider_id, &account, base_url, models_path)
             .await
             .map_err(map_call_error)
             .and_then(map_account_model_result)
