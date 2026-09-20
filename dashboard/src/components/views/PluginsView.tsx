@@ -15,6 +15,7 @@ import {
   Upload,
 } from 'lucide-react';
 import {
+  DiscoveredModel,
   Kinetix,
   PluginCatalogEntry,
   PluginCatalogUpdatePreview,
@@ -95,6 +96,10 @@ export const PluginsView: React.FC = () => {
   const [sha256, setSha256] = useState('');
   const [trustedKeys, setTrustedKeys] = useState('');
   const [allowUntrusted, setAllowUntrusted] = useState(false);
+  const [postAuthProviderId, setPostAuthProviderId] = useState<string | null>(null);
+  const [postAuthModels, setPostAuthModels] = useState<DiscoveredModel[]>([]);
+  const [selectedPostAuthModels, setSelectedPostAuthModels] = useState<string[]>([]);
+  const [postAuthLoading, setPostAuthLoading] = useState(false);
 
   const loadDetail = useCallback(async (id: string) => {
     const [plugin, grants, settingState] = await Promise.all([
@@ -155,6 +160,7 @@ export const PluginsView: React.FC = () => {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const authResult = params.get('plugin_auth');
+    const providerId = params.get('provider_id');
     if (authResult) {
       const messages: Record<string, string> = {
         success: 'Account connected successfully through the plugin authorization flow.',
@@ -166,10 +172,30 @@ export const PluginsView: React.FC = () => {
       const message = messages[authResult] ?? 'Account authorization returned an unknown result.';
       if (authResult === 'success') {
         setNotice(message);
+        if (providerId) {
+          setPostAuthProviderId(providerId);
+          setPostAuthLoading(true);
+          void Kinetix.discover(providerId)
+            .then((models) => {
+              setPostAuthModels(models);
+              setSelectedPostAuthModels(
+                models.filter((model) => !model.already_imported).map((model) => model.id),
+              );
+            })
+            .catch((err) => {
+              setError(
+                `Account connected, but model discovery failed: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              );
+            })
+            .finally(() => setPostAuthLoading(false));
+        }
       } else {
         setError(message);
       }
       params.delete('plugin_auth');
+      params.delete('provider_id');
       const query = params.toString();
       window.history.replaceState(
         null,
@@ -409,6 +435,42 @@ export const PluginsView: React.FC = () => {
     }
   };
 
+  const importPostAuthModels = async () => {
+    if (!postAuthProviderId || selectedPostAuthModels.length === 0) return;
+    setBusy('post-auth-import');
+    setError(null);
+    setNotice(null);
+    try {
+      const selectedModels = postAuthModels.filter(
+        (model) => selectedPostAuthModels.includes(model.id) && !model.already_imported,
+      );
+      for (const model of selectedModels) {
+        await Kinetix.createModel(postAuthProviderId, {
+          upstream_id: model.id,
+          display_name: model.display_name || model.id,
+          enabled: false,
+          context_window: model.context_window ?? null,
+          max_output_tokens: model.max_output_tokens ?? null,
+          capabilities: {},
+          prices: {},
+          parameters: {},
+          thinking_map: {},
+          extra_request: {},
+        });
+      }
+      const refreshed = await Kinetix.discover(postAuthProviderId);
+      setPostAuthModels(refreshed);
+      setSelectedPostAuthModels([]);
+      setNotice(
+        `Imported ${selectedModels.length} model${selectedModels.length === 1 ? '' : 's'} disabled. Review metadata before enabling them.`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const setupAndConnect = async (
     pluginId: string,
     integrationId: string,
@@ -497,6 +559,91 @@ export const PluginsView: React.FC = () => {
           <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
           <span>{notice}</span>
         </div>
+      )}
+
+      {postAuthProviderId && (
+        <WobblyCard decoration="tape" className="p-5">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+              <h3 className="text-xl font-heading font-bold">Finish provider setup</h3>
+              <p className="text-sm font-body text-[var(--ink)]/70">
+                The account is connected. Kinetix is using the provider&apos;s plugin model source
+                to discover available models. Imports are created disabled so capabilities and pricing
+                can be reviewed before traffic is routed to them.
+              </p>
+            </div>
+            <SketchBadge variant="green">Connected</SketchBadge>
+          </div>
+
+          {postAuthLoading ? (
+            <div className="mt-4 text-sm font-mono flex items-center gap-2">
+              <RefreshCw className="w-4 h-4 animate-spin" />
+              Discovering models…
+            </div>
+          ) : postAuthModels.length === 0 ? (
+            <p className="mt-4 text-sm font-mono text-[var(--ink)]/60">
+              No models were returned by the provider.
+            </p>
+          ) : (
+            <>
+              <div className="mt-4 max-h-80 overflow-auto border-2 border-[var(--ink)]/20">
+                {postAuthModels.map((model) => {
+                  const checked = selectedPostAuthModels.includes(model.id);
+                  return (
+                    <label
+                      key={model.id}
+                      className="flex items-start gap-3 px-3 py-2 border-b border-dashed border-[var(--ink)]/20 last:border-b-0"
+                    >
+                      <input
+                        type="checkbox"
+                        className="mt-1"
+                        disabled={model.already_imported || busy !== null}
+                        checked={model.already_imported || checked}
+                        onChange={(event) =>
+                          setSelectedPostAuthModels((current) =>
+                            event.target.checked
+                              ? [...current, model.id]
+                              : current.filter((id) => id !== model.id),
+                          )
+                        }
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="font-heading font-bold text-sm">
+                          {model.display_name || model.id}
+                        </div>
+                        <code className="text-xs break-all text-[var(--ink)]/60">{model.id}</code>
+                      </div>
+                      {model.already_imported && <SketchBadge variant="green">Imported</SketchBadge>}
+                    </label>
+                  );
+                })}
+              </div>
+
+              <div className="mt-4 flex gap-2 flex-wrap">
+                <SketchButton
+                  variant="primary"
+                  disabled={busy !== null || selectedPostAuthModels.length === 0}
+                  onClick={() => void importPostAuthModels()}
+                >
+                  {busy === 'post-auth-import'
+                    ? 'Importing…'
+                    : `Import selected (${selectedPostAuthModels.length})`}
+                </SketchButton>
+                <SketchButton
+                  variant="secondary"
+                  disabled={busy !== null}
+                  onClick={() => {
+                    setPostAuthProviderId(null);
+                    setPostAuthModels([]);
+                    setSelectedPostAuthModels([]);
+                  }}
+                >
+                  Done
+                </SketchButton>
+              </div>
+            </>
+          )}
+        </WobblyCard>
       )}
 
       {showInstall && (
