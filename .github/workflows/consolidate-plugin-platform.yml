@@ -35,6 +35,9 @@ jobs:
       - name: Format
         run: cargo fmt --all
 
+      - name: Show merged dashboard tail
+        run: nl -ba dashboard/src/components/views/PluginsView.tsx | tail -n 180
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
