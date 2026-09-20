@@ -696,14 +696,15 @@ fn default_permissive() -> String {
     "permissive".into()
 }
 
-async fn provider_plugin_binding_problems(
-    state: &AppState,
-    body: &ProviderBody,
-) -> Vec<String> {
+async fn provider_plugin_binding_problems(state: &AppState, body: &ProviderBody) -> Vec<String> {
     use crate::plugins::Capability;
 
     let bindings = [
-        ("wire_plugin", body.wire_plugin.as_str(), Capability::ProviderAdapter),
+        (
+            "wire_plugin",
+            body.wire_plugin.as_str(),
+            Capability::ProviderAdapter,
+        ),
         (
             "credential_plugin",
             body.credential_plugin.as_str(),
@@ -734,7 +735,11 @@ async fn provider_plugin_binding_problems(
             ));
             continue;
         };
-        if manager.resolve_binding(reference, capability).await.is_none() {
+        if manager
+            .resolve_binding(reference, capability)
+            .await
+            .is_none()
+        {
             problems.push(format!(
                 "{field} reference '{reference}' does not resolve to an installed, enabled, approved plugin providing {}",
                 capability.manifest_key()
