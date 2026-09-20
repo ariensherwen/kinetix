@@ -4194,7 +4194,10 @@ pub async fn rollback_plugin(
     Json(body): Json<PluginRollbackBody>,
 ) -> ApiResult {
     let manager = plugin_manager(&state)?;
-    let outcome = manager.rollback(&id, body.sha256.trim()).await.map_err(plugin_bad)?;
+    let outcome = manager
+        .rollback(&id, body.sha256.trim())
+        .await
+        .map_err(plugin_bad)?;
 
     let _ = db::insert_audit(
         &state.pool,
