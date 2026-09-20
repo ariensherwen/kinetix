@@ -813,6 +813,21 @@ capacity.
 This keeps the configured quota stable regardless of encryption/base64
 overhead and closes cache/config bypasses.
 
+### 14.0.2 Invocation concurrency isolation
+
+Guest execution uses two host-owned semaphore layers:
+
+- **4 concurrent invocations per plugin**;
+- **16 concurrent plugin invocations globally**.
+
+The per-plugin permit is acquired first. A plugin that has saturated its own
+four slots therefore waits without reserving a global slot that another plugin
+could use. This prevents one noisy or slow guest from monopolizing every
+Wasmtime execution slot while preserving a hard process-wide concurrency cap.
+
+The limits are host policy, not plugin-grantable authority. Removing a plugin
+also drops its cached per-plugin semaphore entry.
+
 ## 14.1 Catalog distribution and publisher trust
 
 The official catalog is a discovery index, not a signing authority. Package
