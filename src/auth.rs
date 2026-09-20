@@ -71,8 +71,7 @@ impl PluginAuthSessions {
         rand::thread_rng().fill_bytes(&mut verifier_bytes);
 
         let state = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(state_bytes);
-        let pkce_verifier =
-            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(verifier_bytes);
+        let pkce_verifier = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(verifier_bytes);
         let pkce_challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD
             .encode(Sha256::digest(pkce_verifier.as_bytes()));
 
@@ -379,7 +378,6 @@ fn validate_cf_access(state: &AppState, token: &str, aud: &str) -> Result<(), St
         .map(|_| ())
         .map_err(|e| format!("Access token rejected: {e}"))
 }
-
 
 #[cfg(test)]
 mod plugin_auth_tests {
