@@ -3620,8 +3620,7 @@ async fn download_catalog_package(
         .map_err(|e| ApiError::bad(format!("invalid catalog artifact URL: {e}")))?;
 
     for redirect_count in 0..=5 {
-        crate::plugins::catalog::validate_download_url(distribution, &url)
-            .map_err(plugin_bad)?;
+        crate::plugins::catalog::validate_download_url(distribution, &url).map_err(plugin_bad)?;
 
         let mut response = state
             .http
@@ -3666,8 +3665,7 @@ async fn download_catalog_package(
             .await
             .map_err(|e| ApiError::bad(format!("reading catalog artifact failed: {e}")))?
         {
-            if bytes.len() as u64 + chunk.len() as u64
-                > crate::plugins::package::MAX_PACKAGE_BYTES
+            if bytes.len() as u64 + chunk.len() as u64 > crate::plugins::package::MAX_PACKAGE_BYTES
             {
                 return Err(ApiError::bad("catalog artifact exceeds package size limit"));
             }
@@ -3735,13 +3733,7 @@ pub async fn install_catalog_plugin(
 
     let source = format!("catalog:{}@{}", plugin.id, plugin.latest_version);
     let outcome = manager
-        .install_from_source(
-            &bytes,
-            Some(&distribution.sha256),
-            &[key],
-            false,
-            &source,
-        )
+        .install_from_source(&bytes, Some(&distribution.sha256), &[key], false, &source)
         .await
         .map_err(plugin_bad)?;
 
