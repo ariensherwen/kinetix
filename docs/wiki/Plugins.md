@@ -173,6 +173,27 @@ An `auth` action must reference an integration that declares both
 `auth_flow` and `credential_strategy`. The browser never executes guest code
 and never receives the credential returned by the authorization exchange.
 
+### Host-owned settings
+
+Plugins may also declare `[[ui.settings]]` fields of kind `text`, `secret`,
+`boolean`, or `select`. The dashboard renders these with Kinetix-owned form
+controls. Values are validated against the manifest and encrypted in the
+plugin KV store under the reserved `_config:` namespace.
+
+Guests may read `_config:<key>` through `host-storage`, but guest writes and
+deletes to that namespace are rejected. Secret values are write-only from the
+dashboard's perspective: the API reports only whether they are configured.
+
+Example:
+
+```toml
+[[ui.settings]]
+key = "login_hint"
+label = "Google account hint"
+kind = "text"
+description = "Optional email address used as an OAuth login hint."
+```
+
 ---
 
 ## Developing Plugins
