@@ -1297,6 +1297,7 @@ impl PluginManager {
     pub async fn model_discover_v2(
         &self,
         id: &str,
+        source_name: &str,
         provider_id: &str,
         account_id: &str,
         base_url: &str,
@@ -1306,25 +1307,12 @@ impl PluginManager {
         PluginFault,
     > {
         if !self
-            .provides(id, Capability::ModelSourceV2, "")
+            .provides(id, Capability::ModelSourceV2, source_name)
             .await
         {
-            // Name-specific validation is performed by the caller's binding
-            // resolution; this guard only ensures the plugin declares v2.
-            let row = self
-                .get(id)
-                .await
-                .map_err(|e| PluginFault::Internal(e.to_string()))?
-                .ok_or_else(|| PluginFault::InvalidResult(format!("plugin '{id}' is not installed")))?;
-            let has_v2 = row
-                .manifest()
-                .map(|m| !m.provides.model_sources_v2.is_empty())
-                .unwrap_or(false);
-            if !has_v2 {
-                return Err(PluginFault::InvalidResult(format!(
-                    "plugin '{id}' does not provide credential-aware model discovery"
-                )));
-            }
+            return Err(PluginFault::InvalidResult(format!(
+                "plugin '{id}' does not provide credential-aware model source '{source_name}'"
+            )));
         }
         self.bump_invocation();
         let _permit = self.inner.semaphore.acquire().await;
