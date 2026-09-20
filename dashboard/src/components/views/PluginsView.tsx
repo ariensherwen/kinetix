@@ -15,6 +15,7 @@ import {
   Upload,
 } from 'lucide-react';
 import {
+  DiscoveredModel,
   Kinetix,
   PluginCatalogEntry,
   PluginDetail,
@@ -83,6 +84,7 @@ export const PluginsView: React.FC = () => {
   const [settings, setSettings] = useState<PluginSettingState[]>([]);
   const [settingDrafts, setSettingDrafts] = useState<Record<string, string | boolean>>({});
   const [rollbackPreview, setRollbackPreview] = useState<PluginRollbackPreview | null>(null);
+  const [discoveredModels, setDiscoveredModels] = useState<Record<string, DiscoveredModel[]>>({});
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -365,6 +367,52 @@ export const PluginsView: React.FC = () => {
       setTrustedKeys('');
       setAllowUntrusted(false);
       await refresh(outcome.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const discoverIntegrationModels = async (providerId: string) => {
+    setBusy(`discover:${providerId}`);
+    setError(null);
+    setNotice(null);
+    try {
+      const models = await Kinetix.discover(providerId);
+      setDiscoveredModels((current) => ({ ...current, [providerId]: models }));
+      setNotice(`Discovered ${models.length} model${models.length === 1 ? '' : 's'}.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const importDiscoveredModel = async (providerId: string, model: DiscoveredModel) => {
+    setBusy(`import:${providerId}:${model.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      await Kinetix.createModel(providerId, {
+        upstream_id: model.id,
+        display_name: model.display_name || model.id,
+        enabled: true,
+        context_window: model.context_window ?? null,
+        max_output_tokens: model.max_output_tokens ?? null,
+        capabilities: model.capabilities ?? {},
+        prices: {},
+        parameters: {},
+        thinking_map: {},
+        extra_request: {},
+      });
+      setDiscoveredModels((current) => ({
+        ...current,
+        [providerId]: (current[providerId] ?? []).map((candidate) =>
+          candidate.id === model.id ? { ...candidate, already_imported: true } : candidate,
+        ),
+      }));
+      setNotice(`Imported model ${model.display_name || model.id}.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
