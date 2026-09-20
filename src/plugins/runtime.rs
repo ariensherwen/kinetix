@@ -37,6 +37,18 @@ pub mod auth_bindings {
     });
 }
 
+/// Optional account-aware model discovery world. Existing legacy model-source
+/// components continue to use the main `plugin` world.
+pub mod model_source_bindings {
+    wasmtime::component::bindgen!({
+        path: "wit/kinetix-plugin.wit",
+        world: "plugin-model-source",
+        imports: { default: async | trappable },
+        exports: { default: async },
+        anyhow: true,
+    });
+}
+
 /// Adapter world (§6.3, §7.1). Kept separate so the buffered host-http import
 /// can never be used as the adapter transport. Adapters are synchronous
 /// translation functions, so this world is bound synchronously and invoked via
@@ -278,6 +290,18 @@ impl PluginRuntime {
         auth_bindings::PluginAuth::instantiate_async(store, component, linker)
             .await
             .map_err(|e| anyhow::anyhow!("instantiating plugin auth component: {e}"))
+    }
+
+    /// Instantiate the optional account-aware model discovery world.
+    pub async fn instantiate_model_source(
+        &self,
+        linker: &Linker<HostCtx>,
+        store: &mut Store<HostCtx>,
+        component: &Component,
+    ) -> Result<model_source_bindings::PluginModelSource> {
+        model_source_bindings::PluginModelSource::instantiate_async(store, component, linker)
+            .await
+            .map_err(|e| anyhow::anyhow!("instantiating plugin model-source component: {e}"))
     }
 
     /// Instantiate the adapter world (§6.3). Uses the same linker (the host
