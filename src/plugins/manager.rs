@@ -139,6 +139,8 @@ struct Inner {
     timeouts: std::sync::atomic::AtomicU64,
     cancellations: std::sync::atomic::AtomicU64,
     http_requests: std::sync::atomic::AtomicU64,
+    component_cache_hits: std::sync::atomic::AtomicU64,
+    component_cache_misses: std::sync::atomic::AtomicU64,
 }
 
 impl PluginManager {
@@ -174,6 +176,8 @@ impl PluginManager {
                 timeouts: Default::default(),
                 cancellations: Default::default(),
                 http_requests: Default::default(),
+                component_cache_hits: Default::default(),
+                component_cache_misses: Default::default(),
             }),
         })
     }
@@ -190,6 +194,8 @@ impl PluginManager {
             timeouts: self.inner.timeouts.load(Relaxed),
             cancellations: self.inner.cancellations.load(Relaxed),
             http_requests: self.inner.http_requests.load(Relaxed),
+            component_cache_hits: self.inner.component_cache_hits.load(Relaxed),
+            component_cache_misses: self.inner.component_cache_misses.load(Relaxed),
         }
     }
 
@@ -212,12 +218,16 @@ impl PluginManager {
     /// deliberately not cached because they contain per-invocation authority,
     /// quotas, counters, and epoch deadlines.
     fn compiled_component(&self, row: &PluginRow) -> Result<Arc<wasmtime::component::Component>> {
+        use std::sync::atomic::Ordering::Relaxed;
+
         if let Some(cached) = self.inner.component_cache.get(&row.id) {
             if cached.package_sha256 == row.package_sha256 {
+                self.inner.component_cache_hits.fetch_add(1, Relaxed);
                 return Ok(cached.component.clone());
             }
         }
 
+        self.inner.component_cache_misses.fetch_add(1, Relaxed);
         let component = Arc::new(self.inner.runtime.compile(&row.component)?);
         self.remember_component(&row.id, &row.package_sha256, component.clone());
         Ok(component)
@@ -1640,6 +1650,8 @@ pub struct PluginCounters {
     pub timeouts: u64,
     pub cancellations: u64,
     pub http_requests: u64,
+    pub component_cache_hits: u64,
+    pub component_cache_misses: u64,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
