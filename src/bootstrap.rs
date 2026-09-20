@@ -39,9 +39,7 @@ pub async fn seed_if_empty(
                 p.name
             )
         })?;
-        if wire == WireFormat::Plugin
-            && p.wire_plugin.as_deref().unwrap_or("").trim().is_empty()
-        {
+        if wire == WireFormat::Plugin && p.wire_plugin.as_deref().unwrap_or("").trim().is_empty() {
             anyhow::bail!(
                 "provider '{}' uses wire_format 'plugin' but has no wire_plugin binding",
                 p.name
