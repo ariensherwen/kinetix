@@ -32,6 +32,8 @@ export interface DiscoveredModel {
   display_name?: string | null;
   context_window?: number | null;
   max_output_tokens?: number | null;
+  capabilities?: Record<string, unknown> | null;
+  raw_metadata?: unknown;
   already_imported: boolean;
 }
 
