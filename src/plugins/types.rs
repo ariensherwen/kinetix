@@ -277,10 +277,18 @@ pub struct Manifest {
     /// A `pure` plugin may not import outbound HTTP.
     #[serde(default = "default_routing_mode")]
     pub routing_facts_mode: String,
+    /// Host-owned refresh cadence for `cached` routing facts. Ignored in
+    /// `pure` mode.
+    #[serde(default = "default_routing_refresh_ms")]
+    pub routing_facts_refresh_ms: u64,
 }
 
 fn default_routing_mode() -> String {
     "pure".into()
+}
+
+fn default_routing_refresh_ms() -> u64 {
+    30_000
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
