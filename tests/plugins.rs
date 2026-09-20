@@ -95,6 +95,24 @@ async fn install_is_disabled_and_records_provenance() {
 }
 
 #[tokio::test]
+async fn install_preserves_exact_package_and_provenance() {
+    let (m, pool) = manager().await;
+    let kxp = build_kxp(GOOD_MANIFEST, EMPTY_COMPONENT);
+    let outcome = m.install(&kxp, None, &[], false).await.unwrap();
+
+    let packages = kinetix::plugins::store::list_packages(&pool, "dev.example.foo")
+        .await
+        .unwrap();
+    assert_eq!(packages.len(), 1);
+    assert_eq!(packages[0].version, "1.2.0");
+    assert_eq!(packages[0].package_sha256, outcome.package_sha256);
+    assert_eq!(packages[0].source, "local");
+
+    let stored = std::fs::read(m.package_root().join(&packages[0].package_path)).unwrap();
+    assert_eq!(stored, kxp);
+}
+
+#[tokio::test]
 async fn hash_mismatch_is_rejected() {
     let (m, _pool) = manager().await;
     let kxp = build_kxp(GOOD_MANIFEST, EMPTY_COMPONENT);
@@ -142,6 +160,13 @@ async fn upgrade_disables_plugin_and_clears_previous_approvals() {
             .unwrap()
             .is_empty()
     );
+
+    let packages = kinetix::plugins::store::list_packages(&pool, "dev.example.foo")
+        .await
+        .unwrap();
+    assert_eq!(packages.len(), 2);
+    assert!(packages.iter().any(|p| p.version == "1.2.0"));
+    assert!(packages.iter().any(|p| p.version == "1.3.0"));
 }
 
 #[tokio::test]
