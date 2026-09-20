@@ -26,21 +26,10 @@ jobs:
         run: |
           git fetch origin fix/plugin-http-dns-pinning-v021
           git merge --no-commit --no-ff -X theirs origin/fix/plugin-http-dns-pinning-v021
-
-      - name: Repair merged dashboard section guard
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path("dashboard/src/components/views/PluginsView.tsx")
-          text = p.read_text()
-          guard = "      {section === 'installed' && (\n"
-          target = '      <div className="grid grid-cols-1 xl:grid-cols-[minmax(280px,0.8fr)_minmax(0,2fr)] gap-6">\n'
-          if guard not in text:
-              if target not in text:
-                  raise SystemExit("installed plugin grid anchor not found")
-              text = text.replace(target, guard + target, 1)
-              p.write_text(text)
-          PY
+          # The older dashboard-tab slice conflicts semantically with the newer
+          # review-first catalog + post-OAuth discovery UX. Keep the current
+          # product dashboard while retaining the runtime/backend hardening.
+          git checkout origin/fix/plugin-http-dns-pinning-v021 -- dashboard/src/components/views/PluginsView.tsx
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
