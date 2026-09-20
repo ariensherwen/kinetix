@@ -118,6 +118,7 @@ version = "0.1.0"
 credential_strategies = ["antigravity-oauth"]
 auth_flows = ["antigravity"]
 provider_adapters = ["antigravity"]
+model_sources_v2 = ["antigravity"]
 
 [[integrations]]
 id = "antigravity"
@@ -126,6 +127,7 @@ description = "Connect a Google Antigravity account and use the v1internal model
 provider_adapter = "antigravity"
 credential_strategy = "antigravity-oauth"
 auth_flow = "antigravity"
+model_source_v2 = "antigravity"
 
 [integrations.provider]
 base_url = "https://autopush-alkalimakersuite-pa.sandbox.googleapis.com"
@@ -136,7 +138,7 @@ capability_mode = "permissive"
 follow_redirects = false
 
 [permissions]
-network_hosts = ["accounts.google.com", "oauth2.googleapis.com", "www.googleapis.com"]
+network_hosts = ["accounts.google.com", "oauth2.googleapis.com", "www.googleapis.com", "daily-cloudcode-pa.sandbox.googleapis.com"]
 credential_scopes = ["credential_strategy:antigravity-oauth"]
 credential_read = true
 
@@ -154,10 +156,34 @@ An optional `[[integrations]]` entry groups low-level capabilities into a
 user-facing integration. It is declarative metadata only: it executes no
 dashboard code and grants no additional authority.
 
-Every referenced `provider_adapter`, `credential_strategy`, `auth_flow`, or
-`model_source` must be declared by the same plugin in `[provides]`. Kinetix
+Every referenced `provider_adapter`, `credential_strategy`, `auth_flow`,
+`model_source`, or `model_source_v2` must be declared by the same plugin in
+`[provides]`. An Integration may declare only one model-source version. Kinetix
 rejects duplicate integration IDs, empty integrations, and references to
 undeclared capabilities during installation.
+
+### Credential-aware model discovery
+
+The original API-v1 `model_source` capability remains supported unchanged.
+For OAuth or other account-bound discovery, a plugin can instead declare:
+
+```toml
+[provides]
+model_sources_v2 = ["example"]
+
+[[integrations]]
+model_source_v2 = "example"
+```
+
+`model_source_v2` is exported from the separate optional
+`plugin-model-source-v2` WIT world. Kinetix selects an enabled account for the
+provider and passes only its provider/account identifiers. The guest can then
+use its approved host credential/network capabilities; existing plugins that
+only implement the original `plugin` world remain ABI-compatible.
+
+Providers still store a single `model_source_plugin` reference. At discovery
+time the host resolves that reference as v2 first, then v1, and fails closed if
+neither approved capability exists.
 
 ### Credential scopes for generated providers
 
