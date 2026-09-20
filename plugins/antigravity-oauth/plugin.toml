@@ -22,6 +22,13 @@ provider_adapter = "antigravity"
 credential_strategy = "antigravity-oauth"
 auth_flow = "antigravity"
 
+[[ui.actions]]
+id = "connect-account"
+label = "Connect account"
+kind = "auth"
+integration = "antigravity"
+description = "Sign in with Google and add an Antigravity account to a bound provider."
+
 [permissions]
 # Browser authorization is host-validated; token exchange and userinfo are
 # performed through host-mediated buffered HTTP.
