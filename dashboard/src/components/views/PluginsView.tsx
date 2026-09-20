@@ -766,6 +766,11 @@ export const PluginsView: React.FC = () => {
                               models:{integration.model_source}
                             </code>
                           )}
+                          {integration.model_source_v2 && (
+                            <code className="text-xs bg-[var(--erased)] px-2 py-1">
+                              models:v2:{integration.model_source_v2}
+                            </code>
+                          )}
                         </div>
 
                         {selected.ui.actions
