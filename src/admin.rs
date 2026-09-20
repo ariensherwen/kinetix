@@ -3546,9 +3546,13 @@ pub async fn get_plugin(
     let runtime = crate::plugins::store::runtime_state(&state.pool, &id)
         .await
         .map_err(ApiError::internal)?;
+    let packages = crate::plugins::store::list_packages(&state.pool, &id)
+        .await
+        .map_err(ApiError::internal)?;
     let mut summary = crate::plugins::manager::manifest_summary(&row);
     summary["permissions_approved"] = json!(perms);
     summary["runtime"] = json!(runtime);
+    summary["packages"] = json!(packages);
     Ok(Json(summary))
 }
 
@@ -3606,6 +3610,7 @@ pub async fn install_plugin(
     Ok(Json(json!({
         "id": outcome.id,
         "version": outcome.version,
+        "sha256": outcome.package_sha256,
         "signature": outcome.signature.as_str(),
         "provides": outcome.provides,
         "enabled": false,
