@@ -13,6 +13,7 @@ plugin_api = "1"
 credential_strategies = ["antigravity-oauth"]
 auth_flows = ["antigravity"]
 provider_adapters = ["antigravity"]
+model_sources = ["antigravity"]
 
 [[integrations]]
 id = "antigravity"
@@ -21,14 +22,16 @@ description = "Connect a Google Antigravity account and use the v1internal model
 provider_adapter = "antigravity"
 credential_strategy = "antigravity-oauth"
 auth_flow = "antigravity"
+model_source = "antigravity"
 
 [integrations.provider]
-base_url = "https://autopush-alkalimakersuite-pa.sandbox.googleapis.com"
+base_url = "https://daily-cloudcode-pa.googleapis.com"
 wire_format = "plugin"
 auth_scheme = "bearer"
 timeout_ms = 120000
 capability_mode = "permissive"
 follow_redirects = false
+models_path = "/v1internal:fetchAvailableModels"
 
 [[ui.settings]]
 key = "login_hint"
@@ -46,7 +49,7 @@ description = "Sign in with Google and add an Antigravity account to a bound pro
 [permissions]
 # Browser authorization is host-validated; token exchange and userinfo are
 # performed through host-mediated buffered HTTP.
-network_hosts = ["accounts.google.com", "oauth2.googleapis.com", "www.googleapis.com"]
+network_hosts = ["accounts.google.com", "oauth2.googleapis.com", "www.googleapis.com", "daily-cloudcode-pa.googleapis.com"]
 credential_scopes = ["credential_strategy:antigravity-oauth"]
 # The refresh_token exchange puts the secret in a POST body, which the opaque
 # handle model cannot express, so this plugin requires plaintext credential
