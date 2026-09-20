@@ -207,6 +207,31 @@ dashboard present a product-level integration such as **Google Antigravity**
 instead of requiring operators to manually compose `wire_plugin` and
 `credential_plugin` references.
 
+### 6.0.2 AuthFlow
+
+AuthFlow provisions an account through a provider-owned browser authorization
+flow. It is a separate `plugin-auth` world so existing plugin API v1
+components do not gain a mandatory export.
+
+Security ownership is intentionally split:
+
+- **Kinetix core** creates one-time high-entropy CSRF state and PKCE verifier
+  material, enforces expiry/replay protection, constructs the callback URI,
+  validates the plugin-returned authorization URL against HTTPS + reviewed
+  `network_hosts`, bounds and validates the returned credential JSON, encrypts
+  it, and inserts the account.
+- **The plugin** constructs provider-specific authorization URLs and performs
+  token exchange/post-exchange calls through its approved `host-http`
+  capability.
+
+The callback may enroll only into a provider whose `credential_plugin` still
+matches the integration's declared credential strategy. State is consumed
+before token exchange, so callback replay fails closed.
+
+The browser never receives access or refresh tokens from Kinetix. Provider
+client constraints remain plugin-specific: for example, the bundled
+Antigravity desktop OAuth client supports loopback callbacks only.
+
 ### 6.1 CredentialStrategy
 
 Purpose:
