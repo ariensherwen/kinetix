@@ -761,6 +761,11 @@ pub async fn create_provider(
     }
     let wire =
         WireFormat::parse(&body.wire_format).ok_or_else(|| ApiError::bad("invalid wire_format"))?;
+    if wire == WireFormat::Plugin && body.wire_plugin.trim().is_empty() {
+        return Err(ApiError::bad(
+            "wire_format 'plugin' requires a wire_plugin binding",
+        ));
+    }
     let auth =
         AuthScheme::parse(&body.auth_scheme).ok_or_else(|| ApiError::bad("invalid auth_scheme"))?;
 
@@ -840,6 +845,11 @@ pub async fn update_provider(
     }
     let wire =
         WireFormat::parse(&body.wire_format).ok_or_else(|| ApiError::bad("invalid wire_format"))?;
+    if wire == WireFormat::Plugin && body.wire_plugin.trim().is_empty() {
+        return Err(ApiError::bad(
+            "wire_format 'plugin' requires a wire_plugin binding",
+        ));
+    }
     let auth =
         AuthScheme::parse(&body.auth_scheme).ok_or_else(|| ApiError::bad("invalid auth_scheme"))?;
     db::update_provider(
@@ -2040,6 +2050,9 @@ pub async fn validate_provider(
         body.custom_param_name.as_deref(),
     );
     problems.extend(provider_plugin_binding_problems(&state, &body).await);
+    if body.wire_format == "plugin" && body.wire_plugin.trim().is_empty() {
+        problems.push("wire_format 'plugin' requires a wire_plugin binding".into());
+    }
     let mut warnings: Vec<String> = Vec::new();
     let mut security: Value = Value::String("not_checked".into());
     if body.base_url.trim().is_empty() {
