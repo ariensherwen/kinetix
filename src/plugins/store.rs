@@ -201,6 +201,16 @@ pub async fn list_packages(pool: &Pool, id: &str) -> Result<Vec<PackageRow>> {
     .await?)
 }
 
+pub async fn get_package(pool: &Pool, id: &str, sha256: &str) -> Result<Option<PackageRow>> {
+    Ok(sqlx::query_as::<_, PackageRow>(
+        "SELECT * FROM plugin_packages WHERE plugin_id = ? AND package_sha256 = ?",
+    )
+    .bind(id)
+    .bind(sha256)
+    .fetch_optional(pool)
+    .await?)
+}
+
 pub async fn set_enabled(pool: &Pool, id: &str, enabled: bool) -> Result<()> {
     sqlx::query("UPDATE plugins SET enabled = ?, updated_at = ? WHERE id = ?")
         .bind(if enabled { 1 } else { 0 })
