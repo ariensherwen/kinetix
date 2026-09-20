@@ -713,6 +713,18 @@ impl bindings::kinetix::plugin::host_storage::Host for HostCtx {
         if max_age_ms == 0 || max_age_ms > 24 * 3600 * 1000 {
             return Ok(Err("max_age_ms out of range".into()));
         }
+        if !self.pending_cache.contains_key(&name) && self.pending_cache.len() >= 256 {
+            return Ok(Err("cached routing fact count exceeds 256".into()));
+        }
+        let current_bytes: usize = self
+            .pending_cache
+            .iter()
+            .filter(|(existing, _)| *existing != &name)
+            .map(|(_, (value, _))| value.len())
+            .sum();
+        if current_bytes.saturating_add(value_json.len()) as u64 > self.storage_quota {
+            return Ok(Err("cached routing facts exceed storage quota".into()));
+        }
         self.pending_cache.insert(name, (value_json, max_age_ms));
         Ok(Ok(()))
     }
