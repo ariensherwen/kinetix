@@ -275,9 +275,42 @@ artifact naming. Package installation still requires the normal Kinetix package
 pipeline: package bytes are hashed, signatures are evaluated, permissions are
 reviewed, and the plugin installs disabled.
 
-Remote signed release-asset installation can be layered on top of this catalog
-once publisher trust keys and release artifacts are distributed independently
-of catalog metadata.
+Remote signed release-asset installation is enabled only when all of the
+following are present:
+
+- the catalog entry is marked `installable = true`;
+- it contains an HTTPS distribution URL, exact SHA-256, publisher key id, and
+  explicit redirect-host allow-list;
+- the publisher key id resolves in the separate compiled
+  `plugins/trusted-publishers.json` trust store;
+- the downloaded package's SHA, manifest id/version, and Ed25519 signature all
+  verify before installation.
+
+The dashboard sends only the catalog plugin id. It cannot supply an arbitrary
+download URL or signing key.
+
+### Publisher bootstrap
+
+Generate the signing key offline and keep the private key out of the repository:
+
+```sh
+openssl genpkey -algorithm ED25519 -out kinetix-plugin-signing.pem
+bash scripts/plugin-publisher-key.sh kinetix-plugin-signing.pem
+```
+
+Commit only the printed raw public key (base64) to
+`plugins/trusted-publishers.json`, with a stable key id such as
+`kinetix-official-v1`. Set `KINETIX_PLUGIN_SIGNING_KEY_FILE` when using
+`scripts/release-local.sh`, or configure the
+`KINETIX_PLUGIN_SIGNING_KEY_PEM` GitHub Actions secret for the manual release
+workflow.
+
+`scripts/build-plugin.sh` then embeds `signature.ed25519` in the deterministic
+`.kxp`. Release checksums include both Kinetix binaries and signed plugin
+packages.
+
+Do not set an entry `installable = true` until the signed release asset exists
+and its exact SHA-256 and redirect hosts have been committed to the catalog.
 
 ## Operating Plugins
 
