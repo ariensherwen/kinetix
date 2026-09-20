@@ -821,13 +821,7 @@ mod tests {
         async fn kv_get(&self, _: &str, _: &str) -> anyhow::Result<Option<Vec<u8>>> {
             Ok(None)
         }
-        async fn kv_put_limited(
-            &self,
-            _: &str,
-            _: &str,
-            _: &[u8],
-            _: u64,
-        ) -> anyhow::Result<()> {
+        async fn kv_put_limited(&self, _: &str, _: &str, _: &[u8], _: u64) -> anyhow::Result<()> {
             Ok(())
         }
         async fn kv_delete(&self, _: &str, _: &str) -> anyhow::Result<()> {
