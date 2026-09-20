@@ -20,6 +20,100 @@ use crate::types::ProxyError;
 
 pub const SESSION_COOKIE: &str = "kinetix_admin";
 
+const PLUGIN_AUTH_TTL: Duration = Duration::from_secs(10 * 60);
+
+/// One-time browser authorization session for a plugin-provided account flow.
+/// These sessions are deliberately in-memory: authorization codes, PKCE
+/// verifiers, and CSRF state never enter the control-plane database.
+#[derive(Clone, Debug)]
+pub struct PluginAuthSession {
+    pub plugin_id: String,
+    pub flow_name: String,
+    pub provider_id: String,
+    pub redirect_uri: String,
+    pub pkce_verifier: String,
+    expires_at: Instant,
+}
+
+#[derive(Clone, Debug)]
+pub struct PluginAuthStart {
+    pub state: String,
+    pub pkce_challenge: String,
+}
+
+pub struct PluginAuthSessions {
+    inner: Mutex<HashMap<String, PluginAuthSession>>,
+}
+
+impl PluginAuthSessions {
+    pub fn new() -> Self {
+        Self {
+            inner: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn create(
+        &self,
+        plugin_id: &str,
+        flow_name: &str,
+        provider_id: &str,
+        redirect_uri: &str,
+    ) -> PluginAuthStart {
+        use base64::Engine;
+        use rand::RngCore;
+        use sha2::{Digest, Sha256};
+
+        let mut state_bytes = [0u8; 32];
+        let mut verifier_bytes = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut state_bytes);
+        rand::thread_rng().fill_bytes(&mut verifier_bytes);
+
+        let state = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(state_bytes);
+        let pkce_verifier =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(verifier_bytes);
+        let pkce_challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(Sha256::digest(pkce_verifier.as_bytes()));
+
+        let now = Instant::now();
+        let mut map = self.inner.lock();
+        map.retain(|_, session| session.expires_at > now);
+        map.insert(
+            state.clone(),
+            PluginAuthSession {
+                plugin_id: plugin_id.to_string(),
+                flow_name: flow_name.to_string(),
+                provider_id: provider_id.to_string(),
+                redirect_uri: redirect_uri.to_string(),
+                pkce_verifier,
+                expires_at: now + PLUGIN_AUTH_TTL,
+            },
+        );
+
+        PluginAuthStart {
+            state,
+            pkce_challenge,
+        }
+    }
+
+    /// Consume a state token exactly once.
+    pub fn take(&self, state: &str) -> Option<PluginAuthSession> {
+        let now = Instant::now();
+        let mut map = self.inner.lock();
+        map.retain(|_, session| session.expires_at > now);
+        map.remove(state).filter(|session| session.expires_at > now)
+    }
+
+    pub fn revoke(&self, state: &str) {
+        self.inner.lock().remove(state);
+    }
+}
+
+impl Default for PluginAuthSessions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Setting key under which the admin password hash is stored in the database.
 pub const ADMIN_PASSWORD_SETTING: &str = "admin_password_hash";
 
