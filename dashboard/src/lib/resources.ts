@@ -173,6 +173,8 @@ export interface PluginSummary {
   ui: PluginUi;
   permissions: PluginPermissions;
   limits: PluginLimits;
+  routing_facts_mode: 'pure' | 'cached' | string;
+  routing_facts_refresh_ms: number;
 }
 
 export interface PluginPermissionGrant {
