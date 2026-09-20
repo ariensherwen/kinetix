@@ -137,6 +137,9 @@ pub struct HostCtx {
     pub plugin_id: String,
     /// Granted network hosts (already validated, §9).
     pub network_hosts: Vec<String>,
+    /// Operator-owned development override for private/internal destinations.
+    /// This is never derived from plugin manifest data.
+    pub allow_private_network: bool,
     /// Whether the plugin may read plaintext credentials (§8.2).
     pub credential_read: bool,
     /// Whether the plugin may use host-side credential signing (§7.3).
@@ -149,6 +152,9 @@ pub struct HostCtx {
     pub max_outbound_requests: u32,
     /// Max outbound body size.
     pub max_http_body: u64,
+    /// Entire host-mediated HTTP request budget, derived from the effective
+    /// plugin wall-time limit.
+    pub http_timeout: Duration,
     /// Whether the plugin may open the streaming adapter transport (§7.1).
     pub adapter_stream: bool,
     /// Whether this specific invocation may use buffered host-http. Authority
@@ -158,8 +164,6 @@ pub struct HostCtx {
     pub buffered_http_allowed: bool,
     /// Outbound request counter for the current invocation.
     pub outbound_count: u32,
-    /// The HTTP client used for host-mediated outbound requests.
-    pub http: reqwest::Client,
     /// Storage + credential side effects are deferred to async host functions;
     /// this holds the backing handles.
     pub backing: Arc<dyn HostBacking>,
@@ -371,16 +375,36 @@ fn err(code: &str, message: impl Into<String>) -> wit::types::PluginError {
     }
 }
 
-async fn pinned_plugin_http_client(host: &str, port: u16) -> Result<reqwest::Client, String> {
+fn blocked_plugin_hostname(host: &str) -> bool {
+    let lower = host.to_ascii_lowercase();
+    lower == "localhost"
+        || lower.ends_with(".localhost")
+        || lower.ends_with(".internal")
+        || lower == "metadata.google.internal"
+}
+
+async fn pinned_plugin_http_client(
+    host: &str,
+    port: u16,
+    allow_private_network: bool,
+    timeout: Duration,
+) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(10))
+        .connect_timeout(timeout.min(Duration::from_secs(10)))
+        .timeout(timeout)
         .redirect(reqwest::redirect::Policy::none())
         .https_only(true)
         .no_proxy()
         .user_agent(concat!("kinetix-plugin/", env!("CARGO_PKG_VERSION")));
 
+    if !allow_private_network && blocked_plugin_hostname(host) {
+        return Err(format!(
+            "host '{host}' is a blocked private/link-local/metadata destination"
+        ));
+    }
+
     if let Ok(ip) = host.parse::<std::net::IpAddr>() {
-        if crate::admin::is_blocked_ip(ip) {
+        if !allow_private_network && crate::admin::is_blocked_ip(ip) {
             return Err(format!(
                 "host '{host}' is a blocked private/link-local/metadata address"
             ));
@@ -393,7 +417,7 @@ async fn pinned_plugin_http_client(host: &str, port: u16) -> Result<reqwest::Cli
         let mut addrs = Vec::new();
         for addr in resolved {
             let ip = addr.ip();
-            if crate::admin::is_blocked_ip(ip) {
+            if !allow_private_network && crate::admin::is_blocked_ip(ip) {
                 return Err(format!(
                     "host '{host}' resolves to a blocked private/link-local/metadata address ({ip})"
                 ));
@@ -490,7 +514,14 @@ impl bindings::kinetix::plugin::host_http::Host for HostCtx {
         }
 
         let port = parsed.port_or_known_default().unwrap_or(443);
-        let client = match pinned_plugin_http_client(&host, port).await {
+        let client = match pinned_plugin_http_client(
+            &host,
+            port,
+            self.allow_private_network,
+            self.http_timeout,
+        )
+        .await
+        {
             Ok(client) => client,
             Err(message) => return Ok(Err(err("permission_denied", message))),
         };
@@ -828,16 +859,17 @@ mod tests {
         let ctx = HostCtx {
             plugin_id: "test".into(),
             network_hosts: vec![],
+            allow_private_network: false,
             credential_read: false,
             credential_sign: false,
             credential_scopes: vec![],
             storage_quota: 1024,
             max_outbound_requests: 1,
             max_http_body: 1024,
+            http_timeout: Duration::from_secs(1),
             adapter_stream: false,
             buffered_http_allowed: false,
             outbound_count: 0,
-            http: reqwest::Client::new(),
             backing: std::sync::Arc::new(NoBacking),
             limits: wasmtime::StoreLimitsBuilder::new().build(),
         };
@@ -853,16 +885,17 @@ mod tests {
         HostCtx {
             plugin_id: "test".into(),
             network_hosts,
+            allow_private_network: false,
             credential_read: false,
             credential_sign: false,
             credential_scopes: vec![],
             storage_quota: 1024,
             max_outbound_requests: 1,
             max_http_body: 1024,
+            http_timeout: Duration::from_secs(1),
             adapter_stream: false,
             buffered_http_allowed,
             outbound_count: 0,
-            http: reqwest::Client::new(),
             backing: std::sync::Arc::new(NoBacking),
             limits: wasmtime::StoreLimitsBuilder::new().build(),
         }
@@ -894,6 +927,33 @@ mod tests {
                 "{ip} must remain public"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn private_destination_override_is_operator_controlled() {
+        assert!(
+            pinned_plugin_http_client(
+                "127.0.0.1",
+                443,
+                false,
+                Duration::from_secs(1),
+            )
+            .await
+            .is_err()
+        );
+        assert!(
+            pinned_plugin_http_client(
+                "127.0.0.1",
+                443,
+                true,
+                Duration::from_secs(1),
+            )
+            .await
+            .is_ok()
+        );
+        assert!(blocked_plugin_hostname("db.internal"));
+        assert!(blocked_plugin_hostname("metadata.google.internal"));
+        assert!(!blocked_plugin_hostname("api.example.com"));
     }
 
     #[tokio::test]
