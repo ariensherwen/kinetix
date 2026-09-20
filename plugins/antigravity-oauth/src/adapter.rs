@@ -19,7 +19,7 @@
 use serde_json::{json, Map, Value};
 
 /// The IDE fingerprint Antigravity expects (macOS on purpose, even on Linux).
-const USER_AGENT: &str = "antigravity/ide/2.11.0 darwin/arm64";
+pub(crate) const USER_AGENT: &str = "antigravity/ide/2.11.0 darwin/arm64";
 
 const MAX_OUTPUT_TOKENS: i64 = 64000;
 
