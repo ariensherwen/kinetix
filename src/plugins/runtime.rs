@@ -911,6 +911,38 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn cached_fact_namespace_is_host_owned_and_refresh_buffered() {
+        use bindings::kinetix::plugin::host_storage::Host as _;
+
+        let mut ctx = test_ctx(false, vec![]);
+        assert!(ctx
+            .put("_cache:direct".into(), b"bad".to_vec())
+            .await
+            .unwrap()
+            .is_err());
+        assert!(ctx
+            .delete("_cache:direct".into())
+            .await
+            .unwrap()
+            .is_err());
+        assert!(ctx
+            .cache_set("capacity".into(), "true".into(), 30_000)
+            .await
+            .unwrap()
+            .is_err());
+
+        ctx.capability = "routing_facts.refresh".into();
+        ctx.cache_set("capacity".into(), "true".into(), 30_000)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            ctx.pending_cache.get("capacity"),
+            Some(&(String::from("true"), 30_000))
+        );
+    }
+
     #[test]
     fn blocked_ip_policy_covers_private_metadata_and_special_ranges() {
         for ip in [
