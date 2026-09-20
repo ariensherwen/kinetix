@@ -72,6 +72,14 @@ export interface PluginCatalogEntry {
   artifact_name: string;
   capabilities: string[];
   installable: boolean;
+  install_ready?: boolean;
+  trust_status?: 'trusted' | 'unavailable' | 'discovery_only' | string;
+  distribution?: {
+    url: string;
+    sha256: string;
+    publisher_key_id: string;
+    allowed_hosts: string[];
+  } | null;
   note?: string;
 }
 
@@ -321,6 +329,10 @@ export const Kinetix = {
   },
   pluginCatalog: () =>
     api.get<PluginCatalogResponse>('/admin/api/plugins/catalog'),
+  installCatalogPlugin: (id: string) =>
+    api.post<PluginInstallResult>(
+      `/admin/api/plugins/catalog/${encodeURIComponent(id)}/install`,
+    ),
   plugin: (id: string) =>
     api.get<PluginDetail>(`/admin/api/plugins/${encodeURIComponent(id)}`),
   pluginPermissions: (id: string) =>
