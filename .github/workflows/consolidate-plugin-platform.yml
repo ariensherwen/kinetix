@@ -27,6 +27,21 @@ jobs:
           git fetch origin fix/plugin-http-dns-pinning-v021
           git merge --no-commit --no-ff -X theirs origin/fix/plugin-http-dns-pinning-v021
 
+      - name: Repair merged dashboard section guard
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("dashboard/src/components/views/PluginsView.tsx")
+          text = p.read_text()
+          guard = "      {section === 'installed' && (\n"
+          target = '      <div className="grid grid-cols-1 xl:grid-cols-[minmax(280px,0.8fr)_minmax(0,2fr)] gap-6">\n'
+          if guard not in text:
+              if target not in text:
+                  raise SystemExit("installed plugin grid anchor not found")
+              text = text.replace(target, guard + target, 1)
+              p.write_text(text)
+          PY
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -34,9 +49,6 @@ jobs:
 
       - name: Format
         run: cargo fmt --all
-
-      - name: Show merged dashboard tail
-        run: nl -ba dashboard/src/components/views/PluginsView.tsx | tail -n 180
 
       - uses: actions/setup-node@v4
         with:
