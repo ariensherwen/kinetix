@@ -148,6 +148,50 @@ fn default_storage() -> String {
     "2MiB".into()
 }
 
+fn default_integration_wire_format() -> String {
+    "plugin".into()
+}
+
+fn default_integration_auth_scheme() -> String {
+    "bearer".into()
+}
+
+fn default_integration_timeout_ms() -> u64 {
+    120_000
+}
+
+fn default_integration_capability_mode() -> String {
+    "permissive".into()
+}
+
+/// Host-owned provider defaults for a user-facing integration. Kinetix derives
+/// plugin capability bindings from the parent Integration; the template cannot
+/// point at capabilities from another plugin.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IntegrationProvider {
+    pub base_url: String,
+    #[serde(default = "default_integration_wire_format")]
+    pub wire_format: String,
+    #[serde(default = "default_integration_auth_scheme")]
+    pub auth_scheme: String,
+    #[serde(default)]
+    pub custom_header_name: Option<String>,
+    #[serde(default)]
+    pub custom_param_name: Option<String>,
+    #[serde(default)]
+    pub extra_headers: std::collections::BTreeMap<String, String>,
+    #[serde(default = "default_integration_timeout_ms")]
+    pub timeout_ms: u64,
+    #[serde(default = "default_integration_capability_mode")]
+    pub capability_mode: String,
+    #[serde(default)]
+    pub models_path: Option<String>,
+    #[serde(default)]
+    pub follow_redirects: bool,
+    #[serde(default)]
+    pub credential_hosts: Vec<String>,
+}
+
 /// A user-facing integration assembled from one or more capabilities provided
 /// by the same plugin. This metadata is declarative only: it grants no
 /// authority and contains no browser-executable code.
@@ -165,6 +209,8 @@ pub struct Integration {
     pub auth_flow: Option<String>,
     #[serde(default)]
     pub model_source: Option<String>,
+    #[serde(default)]
+    pub provider: Option<IntegrationProvider>,
 }
 
 /// A native dashboard action declared by a plugin. Actions are metadata only:
