@@ -597,9 +597,10 @@ plugin request
  -> credential-host binding check
  -> DNS resolution
  -> private/link-local/metadata rejection
- -> connect-time resolved-IP recheck
- -> TLS verification
- -> redirect policy
+ -> pin checked DNS answers into the HTTP client
+ -> TLS verification against the original hostname
+ -> zero redirects
+ -> no implicit environment proxy
  -> per-hop revalidation
  -> size/time limits
  -> request
