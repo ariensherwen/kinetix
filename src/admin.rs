@@ -3678,6 +3678,7 @@ pub async fn start_plugin_auth(
         &body.plugin_id,
         &body.flow_name,
         &body.provider_id,
+        &expected_binding,
         &redirect_uri,
     );
     let authorize_url = match manager
@@ -3821,6 +3822,21 @@ pub async fn plugin_auth_callback(
         .await
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found("provider not found"))?;
+    if provider.credential_plugin != session.credential_binding {
+        let _ = db::insert_audit(
+            &state.pool,
+            "admin",
+            "plugin_auth_binding_changed",
+            "provider",
+            &provider.id,
+            &provider.name,
+            "Provider credential binding changed while browser authorization was in progress; account enrollment refused.",
+        )
+        .await;
+        return Ok(Redirect::to(
+            "/admin/plugins?plugin_auth=binding_changed",
+        ));
+    }
     let enc = state
         .crypto
         .encrypt(&result.secret_json)
