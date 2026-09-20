@@ -20,19 +20,21 @@ import {
   Sun,
   Moon,
   Monitor,
+  Puzzle,
 } from 'lucide-react';
 import { ProxyMetrics } from '../types';
 import { formatCurrency } from '../lib/designSystem';
 import { SketchButton, SketchBadge } from './HandDrawnElements';
 import type { ThemeMode } from '../lib/theme';
 
-export type NavTab = 'keys' | 'routes' | 'providers' | 'accounts' | 'usage' | 'requests' | 'aliases' | 'audit' | 'settings';
+export type NavTab = 'keys' | 'routes' | 'providers' | 'accounts' | 'plugins' | 'usage' | 'requests' | 'aliases' | 'audit' | 'settings';
 
 export const TAB_ROUTES: Record<NavTab, string> = {
   keys: '/admin/keys',
   routes: '/admin/routes',
   providers: '/admin/providers',
   accounts: '/admin/accounts',
+  plugins: '/admin/plugins',
   usage: '/admin/usage',
   requests: '/admin/requests',
   aliases: '/admin/aliases',
@@ -66,6 +68,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     items: [
       { id: 'providers', label: 'Upstream Providers', icon: <Server className="w-5 h-5" /> },
       { id: 'accounts', label: 'Accounts & Pools', icon: <Users className="w-5 h-5" /> },
+      { id: 'plugins', label: 'Plugins & Integrations', icon: <Puzzle className="w-5 h-5" /> },
       { id: 'aliases', label: 'Model Aliases', icon: <Compass className="w-5 h-5" /> },
     ],
   },
