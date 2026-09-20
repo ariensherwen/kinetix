@@ -64,6 +64,9 @@ fn default_client_secret() -> String {
 const REFRESH_LEAD_MS: i64 = 5 * 60 * 1000;
 /// KV key prefix where the live access token is written for the host.
 const LEASE_KEY_PREFIX: &str = "lease:";
+const MODEL_SOURCE_KEY_PREFIX: &str = "model-source:";
+const ANTIGRAVITY_USER_AGENT: &str = "antigravity/ide/2.11.0 darwin/arm64";
+const ANTIGRAVITY_CLIENT_VERSION: &str = "2.11.0";
 
 #[derive(serde::Deserialize, serde::Serialize, Default, Clone)]
 struct Credential {
@@ -78,6 +81,13 @@ struct Credential {
     project_id: Option<String>,
     #[serde(default)]
     email: Option<String>,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct ModelSourceCredential {
+    access_token: String,
+    #[serde(default)]
+    project_id: Option<String>,
 }
 
 struct Component;
@@ -123,6 +133,22 @@ impl exports::credential_strategy::Guest for Component {
         let handle = handle_for(&account);
         kinetix_plugin_sdk::helpers::kv_put_string(&format!("{LEASE_KEY_PREFIX}{handle}"), &access)
             .map_err(|e| kinetix_plugin_sdk::helpers::error("plugin_internal", e))?;
+
+        let discovery = ModelSourceCredential {
+            access_token: access.clone(),
+            project_id: cred.project_id.clone(),
+        };
+        let discovery_json = serde_json::to_string(&discovery).map_err(|e| {
+            kinetix_plugin_sdk::helpers::error(
+                "plugin_internal",
+                format!("encoding model-source credential: {e}"),
+            )
+        })?;
+        kinetix_plugin_sdk::helpers::kv_put_string(
+            &model_source_key(&provider_id),
+            &discovery_json,
+        )
+        .map_err(|e| kinetix_plugin_sdk::helpers::error("plugin_internal", e))?;
 
         Ok(CredentialLease {
             handle,
@@ -257,6 +283,10 @@ fn handle_for(account: &AccountRef) -> String {
 
 fn state_key(account: &AccountRef) -> String {
     format!("cred:{}", handle_for(account))
+}
+
+fn model_source_key(provider_id: &str) -> String {
+    format!("{MODEL_SOURCE_KEY_PREFIX}{provider_id}")
 }
 
 // --- Minimal RFC3339 helpers (no chrono in a no_std-ish guest) --------------
@@ -558,8 +588,130 @@ fn unsupported() -> PluginError {
 }
 
 impl exports::model_source::Guest for Component {
-    fn discover(_p: String, _b: String, _m: String) -> Result<Vec<DiscoveredModel>, PluginError> {
-        Err(unsupported())
+    fn discover(
+        provider_id: String,
+        base_url: String,
+        models_path: String,
+    ) -> Result<Vec<DiscoveredModel>, PluginError> {
+        let raw = kinetix_plugin_sdk::helpers::kv_get_string(&model_source_key(&provider_id))
+            .ok_or_else(|| {
+                kinetix_plugin_sdk::helpers::error(
+                    "credential_expired",
+                    "Antigravity model discovery requires a resolved provider credential",
+                )
+            })?;
+        let credential: ModelSourceCredential = serde_json::from_str(&raw).map_err(|e| {
+            kinetix_plugin_sdk::helpers::error(
+                "plugin_internal",
+                format!("decoding model-source credential: {e}"),
+            )
+        })?;
+
+        let base = base_url.trim_end_matches('/');
+        let path = if models_path.trim().is_empty() {
+            "/v1internal:fetchAvailableModels"
+        } else {
+            models_path.as_str()
+        };
+        let url = if path.starts_with('/') {
+            format!("{base}{path}")
+        } else {
+            format!("{base}/{path}")
+        };
+        let body = match credential.project_id.as_deref() {
+            Some(project) if !project.is_empty() => serde_json::json!({ "project": project }),
+            _ => serde_json::json!({}),
+        };
+
+        let req = HttpRequest {
+            method: "POST".into(),
+            url,
+            headers: vec![
+                (
+                    "authorization".into(),
+                    format!("Bearer {}", credential.access_token),
+                ),
+                ("content-type".into(), "application/json".into()),
+                ("accept".into(), "application/json".into()),
+                ("user-agent".into(), ANTIGRAVITY_USER_AGENT.into()),
+                ("x-client-name".into(), "antigravity".into()),
+                (
+                    "x-client-version".into(),
+                    ANTIGRAVITY_CLIENT_VERSION.into(),
+                ),
+            ],
+            body: body.to_string().into_bytes(),
+            credential: None,
+        };
+        let resp = kinetix::plugin::host_http::send(&req).map_err(|e| {
+            kinetix_plugin_sdk::helpers::retryable_error(
+                "upstream_unavailable",
+                format!("{}: {}", e.code, e.message),
+                Some(5),
+            )
+        })?;
+        if resp.body_truncated {
+            return Err(kinetix_plugin_sdk::helpers::error(
+                "protocol_error",
+                "Antigravity model discovery response was truncated",
+            ));
+        }
+        let text = String::from_utf8(resp.body).map_err(|_| {
+            kinetix_plugin_sdk::helpers::error(
+                "protocol_error",
+                "Antigravity model discovery response is not UTF-8",
+            )
+        })?;
+        if resp.status != 200 {
+            return Err(kinetix_plugin_sdk::helpers::error(
+                "upstream_unavailable",
+                format!(
+                    "Antigravity model discovery returned HTTP {}: {}",
+                    resp.status,
+                    truncate(&text, 200)
+                ),
+            ));
+        }
+
+        let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+            kinetix_plugin_sdk::helpers::error(
+                "protocol_error",
+                format!("invalid Antigravity model discovery JSON: {e}"),
+            )
+        })?;
+        let models = value
+            .get("models")
+            .and_then(|value| value.as_object())
+            .ok_or_else(|| {
+                kinetix_plugin_sdk::helpers::error(
+                    "protocol_error",
+                    "Antigravity model discovery response has no models object",
+                )
+            })?;
+
+        let mut out = Vec::new();
+        for (id, metadata) in models {
+            if metadata
+                .get("isInternal")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            out.push(DiscoveredModel {
+                id: id.clone(),
+                display_name: metadata
+                    .get("displayName")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string),
+                context_window: None,
+                max_output_tokens: None,
+                capabilities_json: None,
+                raw_metadata: Some(metadata.to_string()),
+            });
+        }
+        out.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok(out)
     }
 }
 impl exports::health_probe::Guest for Component {
