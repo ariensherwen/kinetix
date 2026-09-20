@@ -3690,14 +3690,19 @@ async fn download_catalog_package(
     Err(ApiError::bad("catalog artifact download failed"))
 }
 
-/// `POST /admin/api/plugins/catalog/{id}/install` — install a trusted catalog package.
-pub async fn install_catalog_plugin(
-    State(state): State<AppState>,
-    _auth: AdminAuth,
-    Path(id): Path<String>,
-) -> ApiResult {
-    let manager = plugin_manager(&state)?;
-    let plugin = crate::plugins::catalog::find_plugin(&id).map_err(plugin_bad)?;
+struct PreparedCatalogPackage {
+    plugin: crate::plugins::catalog::CatalogPlugin,
+    bytes: Vec<u8>,
+    key: [u8; 32],
+    manifest: crate::plugins::Manifest,
+}
+
+async fn prepare_catalog_package(
+    state: &AppState,
+    manager: &crate::plugins::PluginManager,
+    id: &str,
+) -> Result<PreparedCatalogPackage, ApiError> {
+    let plugin = crate::plugins::catalog::find_plugin(id).map_err(plugin_bad)?;
     let distribution = plugin
         .distribution
         .as_ref()
@@ -3712,7 +3717,7 @@ pub async fn install_catalog_plugin(
         .map_err(plugin_bad)?
         .ok_or_else(|| ApiError::bad("catalog publisher key is not trusted"))?;
 
-    let bytes = download_catalog_package(&state, distribution).await?;
+    let bytes = download_catalog_package(state, distribution).await?;
     let pkg = crate::plugins::package::read_package(&bytes).map_err(plugin_bad)?;
     if !distribution
         .sha256
@@ -3744,9 +3749,81 @@ pub async fn install_catalog_plugin(
         ));
     }
 
-    let source = format!("catalog:{}@{}", plugin.id, plugin.latest_version);
+    Ok(PreparedCatalogPackage {
+        plugin,
+        bytes,
+        key,
+        manifest: validated.manifest,
+    })
+}
+
+/// `GET /admin/api/plugins/catalog/{id}/preview` — verify and preview a catalog update.
+pub async fn preview_catalog_plugin(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+    Path(id): Path<String>,
+) -> ApiResult {
+    let manager = plugin_manager(&state)?;
+    let prepared = prepare_catalog_package(&state, manager, &id).await?;
+    let current = manager.get(&id).await.map_err(ApiError::internal)?;
+    let current_manifest = current.as_ref().and_then(|row| row.manifest());
+
+    let permission_diff = current_manifest
+        .as_ref()
+        .map(|manifest| {
+            crate::plugins::manager::permission_diff(
+                &manifest.permissions,
+                &prepared.manifest.permissions,
+            )
+        })
+        .map(serde_json::to_value)
+        .transpose()
+        .map_err(ApiError::internal)?
+        .unwrap_or(Value::Null);
+
+    Ok(Json(json!({
+        "id": prepared.plugin.id,
+        "installed": current.is_some(),
+        "current_version": current.as_ref().map(|row| row.version.clone()),
+        "target_version": prepared.plugin.latest_version,
+        "sha256": prepared
+            .plugin
+            .distribution
+            .as_ref()
+            .map(|distribution| distribution.sha256.clone()),
+        "permissions": prepared.manifest.permissions,
+        "permission_diff": permission_diff,
+        "provides": prepared.manifest.provides.provided(),
+        "note": "candidate package verified; installing it will disable the plugin and clear all approved permissions",
+    })))
+}
+
+/// `POST /admin/api/plugins/catalog/{id}/install` — install a trusted catalog package.
+pub async fn install_catalog_plugin(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+    Path(id): Path<String>,
+) -> ApiResult {
+    let manager = plugin_manager(&state)?;
+    let prepared = prepare_catalog_package(&state, manager, &id).await?;
+    let distribution = prepared
+        .plugin
+        .distribution
+        .as_ref()
+        .ok_or_else(|| ApiError::bad("catalog plugin has no installable distribution"))?;
+
+    let source = format!(
+        "catalog:{}@{}",
+        prepared.plugin.id, prepared.plugin.latest_version
+    );
     let outcome = manager
-        .install_from_source(&bytes, Some(&distribution.sha256), &[key], false, &source)
+        .install_from_source(
+            &prepared.bytes,
+            Some(&distribution.sha256),
+            &[prepared.key],
+            false,
+            &source,
+        )
         .await
         .map_err(plugin_bad)?;
 
