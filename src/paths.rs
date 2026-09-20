@@ -78,6 +78,11 @@ impl Paths {
         self.data_dir.join("backups")
     }
 
+    /// Immutable, content-addressed copies of accepted `.kxp` packages.
+    pub fn plugin_packages_dir(&self) -> PathBuf {
+        self.data_dir.join("plugins").join("packages")
+    }
+
     /// Operational logs (only used when the process is run detached).
     pub fn log_file(&self) -> PathBuf {
         self.state_dir.join("kinetix.log")
@@ -90,6 +95,7 @@ impl Paths {
         }
         std::fs::create_dir_all(self.exports_dir())?;
         std::fs::create_dir_all(self.backups_dir())?;
+        std::fs::create_dir_all(self.plugin_packages_dir())?;
         Ok(())
     }
 }
