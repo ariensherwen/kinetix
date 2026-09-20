@@ -151,6 +151,46 @@ Every referenced `provider_adapter`, `credential_strategy`, `auth_flow`, or
 rejects duplicate integration IDs, empty integrations, and references to
 undeclared capabilities during installation.
 
+### Credential scopes for generated providers
+
+Credential access may be scoped either to a concrete provider id or to the
+provider's plugin binding:
+
+```toml
+[permissions]
+credential_scopes = ["credential_strategy:antigravity-oauth"]
+credential_read = true
+```
+
+`credential_strategy:<name>` is resolved by the host at credential-use time.
+It authorizes this plugin only when the target provider's
+`credential_plugin` is exactly `plugin:<this-plugin-id>/<name>`. This is the
+preferred scope for Integration-created providers because their database ids
+are generated at runtime. Literal `provider:<id>` scopes and `*` remain
+supported; `*` should be reserved for plugins that genuinely need access
+across provider bindings.
+
+### Integration provider templates
+
+An Integration may declare host-owned provider defaults:
+
+```toml
+[integrations.provider]
+base_url = "https://api.example.com"
+wire_format = "plugin"
+auth_scheme = "bearer"
+timeout_ms = 120000
+capability_mode = "permissive"
+follow_redirects = false
+```
+
+Kinetix validates the template when the package is installed. Creating the
+provider is a separate admin operation and re-runs outbound URL checks plus
+capability-binding checks. The host derives `wire_plugin`,
+`credential_plugin`, and `model_source_plugin` from the parent Integration;
+the package cannot inject bindings to another plugin. Repeating setup returns
+the existing matching provider instead of creating a duplicate.
+
 ### Native dashboard actions
 
 Plugins may optionally declare `[[ui.actions]]` records. These are
