@@ -284,6 +284,73 @@ pub async fn runtime_state(pool: &Pool, id: &str) -> Result<Option<RuntimeStateR
     .await?)
 }
 
+/// Whether an invocation may attempt to enter the circuit. Closed circuits are
+/// ready immediately. An open circuit becomes probe-eligible only after its
+/// cooldown has elapsed. A half-open circuit already has a probe in flight.
+pub async fn circuit_ready(pool: &Pool, id: &str) -> Result<bool> {
+    let Some(state) = runtime_state(pool, id).await? else {
+        return Ok(true);
+    };
+    match state.circuit() {
+        CircuitState::Closed => Ok(true),
+        CircuitState::HalfOpen => Ok(false),
+        CircuitState::Open => {
+            let Some(until) = state.circuit_open_until.as_deref() else {
+                return Ok(false);
+            };
+            let until = chrono::DateTime::parse_from_rfc3339(until)
+                .context("invalid plugin circuit_open_until timestamp")?;
+            Ok(until <= chrono::Utc::now())
+        }
+    }
+}
+
+/// Atomically claim the one allowed half-open probe after an open circuit's
+/// cooldown. Returns true for a closed circuit or for the caller that won the
+/// open -> half_open transition. Concurrent callers observe half_open and fail.
+pub async fn claim_circuit_probe(pool: &Pool, id: &str) -> Result<bool> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let claimed = sqlx::query(
+        "UPDATE plugin_runtime_state
+         SET circuit_state = 'half_open', circuit_open_until = NULL
+         WHERE plugin_id = ?
+           AND circuit_state = 'open'
+           AND circuit_open_until IS NOT NULL
+           AND julianday(circuit_open_until) <= julianday(?)",
+    )
+    .bind(id)
+    .bind(&now)
+    .execute(pool)
+    .await?
+    .rows_affected();
+
+    if claimed == 1 {
+        return Ok(true);
+    }
+
+    Ok(match runtime_state(pool, id).await? {
+        None => true,
+        Some(state) => matches!(state.circuit(), CircuitState::Closed),
+    })
+}
+
+/// Return a half-open probe to the open state without incrementing failures.
+/// Used when the probe is cancelled: cancellation is not a plugin fault, but it
+/// also is not evidence that the plugin recovered.
+pub async fn reopen_plugin_circuit(pool: &Pool, id: &str, open_secs: i64) -> Result<()> {
+    let until = (chrono::Utc::now() + chrono::Duration::seconds(open_secs)).to_rfc3339();
+    sqlx::query(
+        "UPDATE plugin_runtime_state
+         SET circuit_state = 'open', circuit_open_until = ?
+         WHERE plugin_id = ? AND circuit_state = 'half_open'",
+    )
+    .bind(until)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// Bump the plugin's consecutive-failure counter and open the circuit when the
 /// threshold is reached (§15). Returns the new count.
 pub async fn record_plugin_failure(
@@ -562,6 +629,58 @@ mod tests {
         .await
         .unwrap();
         (pool, Arc::new(Crypto::new(&[23_u8; 32])), dir)
+    }
+
+    #[tokio::test]
+    async fn circuit_cooldown_allows_exactly_one_half_open_probe() {
+        let (pool, _crypto, dir) = test_store().await;
+        let past = (chrono::Utc::now() - chrono::Duration::seconds(1)).to_rfc3339();
+        sqlx::query(
+            "INSERT INTO plugin_runtime_state
+             (plugin_id, circuit_state, consecutive_failures, circuit_open_until)
+             VALUES ('p', 'open', 5, ?)",
+        )
+        .bind(&past)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert!(circuit_ready(&pool, "p").await.unwrap());
+        assert!(claim_circuit_probe(&pool, "p").await.unwrap());
+        assert_eq!(
+            runtime_state(&pool, "p").await.unwrap().unwrap().circuit(),
+            CircuitState::HalfOpen
+        );
+        assert!(!circuit_ready(&pool, "p").await.unwrap());
+        assert!(!claim_circuit_probe(&pool, "p").await.unwrap());
+
+        clear_plugin_failures(&pool, "p").await.unwrap();
+        assert!(circuit_ready(&pool, "p").await.unwrap());
+        assert!(claim_circuit_probe(&pool, "p").await.unwrap());
+
+        pool.close().await;
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn circuit_open_before_cooldown_remains_blocked() {
+        let (pool, _crypto, dir) = test_store().await;
+        let future = (chrono::Utc::now() + chrono::Duration::seconds(60)).to_rfc3339();
+        sqlx::query(
+            "INSERT INTO plugin_runtime_state
+             (plugin_id, circuit_state, consecutive_failures, circuit_open_until)
+             VALUES ('p', 'open', 5, ?)",
+        )
+        .bind(&future)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert!(!circuit_ready(&pool, "p").await.unwrap());
+        assert!(!claim_circuit_probe(&pool, "p").await.unwrap());
+
+        pool.close().await;
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[tokio::test]
