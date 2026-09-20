@@ -282,6 +282,23 @@ export const PluginsView: React.FC = () => {
     }
   };
 
+  const installFromCatalog = async (entry: PluginCatalogEntry) => {
+    setBusy(`catalog:${entry.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      const outcome = await Kinetix.installCatalogPlugin(entry.id);
+      setNotice(
+        `Installed ${outcome.id} v${outcome.version} from the trusted catalog. Review permissions before enabling it.`,
+      );
+      await refresh(outcome.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const install = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!packageFile) {
@@ -506,8 +523,33 @@ export const PluginsView: React.FC = () => {
                   {entry.note && (
                     <p className="mt-3 text-xs font-body text-[var(--ink)]/60">{entry.note}</p>
                   )}
-                  <div className="mt-3 text-xs font-mono text-[var(--ink)]/55">
-                    Artifact: {entry.artifact_name}
+                  <div className="mt-3 flex items-center justify-between gap-3 flex-wrap">
+                    <div className="text-xs font-mono text-[var(--ink)]/55">
+                      Artifact: {entry.artifact_name}
+                    </div>
+                    {installed?.version === entry.latest_version ? (
+                      <SketchBadge variant="green">Current</SketchBadge>
+                    ) : entry.install_ready ? (
+                      <SketchButton
+                        variant="primary"
+                        className="gap-2"
+                        disabled={busy !== null}
+                        onClick={() => void installFromCatalog(entry)}
+                      >
+                        <PackagePlus className="w-4 h-4" />
+                        {busy === `catalog:${entry.id}`
+                          ? 'Installing…'
+                          : installed
+                            ? `Update to v${entry.latest_version}`
+                            : 'Install'}
+                      </SketchButton>
+                    ) : (
+                      <SketchBadge variant="yellow">
+                        {entry.trust_status === 'unavailable'
+                          ? 'Trust unavailable'
+                          : 'Discovery only'}
+                      </SketchBadge>
+                    )}
                   </div>
                 </div>
               );
