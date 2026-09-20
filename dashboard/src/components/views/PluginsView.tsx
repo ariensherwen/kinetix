@@ -15,6 +15,7 @@ import {
   Upload,
 } from 'lucide-react';
 import {
+  DiscoveredModel,
   Kinetix,
   PluginCatalogEntry,
   PluginDetail,
@@ -83,6 +84,9 @@ export const PluginsView: React.FC = () => {
   const [settings, setSettings] = useState<PluginSettingState[]>([]);
   const [settingDrafts, setSettingDrafts] = useState<Record<string, string | boolean>>({});
   const [rollbackPreview, setRollbackPreview] = useState<PluginRollbackPreview | null>(null);
+  const [postAuthProviderId, setPostAuthProviderId] = useState<string | null>(null);
+  const [postAuthModels, setPostAuthModels] = useState<DiscoveredModel[] | null>(null);
+  const [postAuthDiscovering, setPostAuthDiscovering] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -152,6 +156,9 @@ export const PluginsView: React.FC = () => {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const authResult = params.get('plugin_auth');
+    const callbackPluginId = params.get('plugin_id');
+    const callbackProviderId = params.get('provider_id');
+
     if (authResult) {
       const messages: Record<string, string> = {
         success: 'Account connected successfully through the plugin authorization flow.',
@@ -167,6 +174,8 @@ export const PluginsView: React.FC = () => {
         setError(message);
       }
       params.delete('plugin_auth');
+      params.delete('plugin_id');
+      params.delete('provider_id');
       const query = params.toString();
       window.history.replaceState(
         null,
@@ -175,7 +184,28 @@ export const PluginsView: React.FC = () => {
       );
     }
 
-    void refresh(null);
+    const initialize = async () => {
+      await refresh(callbackPluginId);
+      if (authResult === 'success' && callbackProviderId) {
+        setPostAuthProviderId(callbackProviderId);
+        setPostAuthDiscovering(true);
+        try {
+          const models = await Kinetix.discover(callbackProviderId);
+          setPostAuthModels(models.filter((model) => !model.already_imported));
+        } catch (err) {
+          setError(
+            `Account connected, but model discovery failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+          setPostAuthModels([]);
+        } finally {
+          setPostAuthDiscovering(false);
+        }
+      }
+    };
+
+    void initialize();
     // Initial load only; later refreshes are explicit so selecting an item does
     // not re-run this effect through the selectedId dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -372,6 +402,33 @@ export const PluginsView: React.FC = () => {
     }
   };
 
+  const importPostAuthModel = async (model: DiscoveredModel) => {
+    if (!postAuthProviderId) return;
+    setBusy(`post-auth-model:${model.id}`);
+    setError(null);
+    try {
+      await Kinetix.createModel(postAuthProviderId, {
+        upstream_id: model.id,
+        display_name: model.display_name || model.id,
+        enabled: true,
+        context_window: model.context_window ?? null,
+        max_output_tokens: model.max_output_tokens ?? null,
+        capabilities: {},
+        prices: {},
+        parameters: {},
+        thinking_map: {},
+        extra_request: {},
+      });
+      setPostAuthModels((current) => current?.filter((item) => item.id !== model.id) ?? null);
+      setNotice(`Imported model ${model.display_name || model.id}.`);
+      await refresh(selectedId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const setupAndConnect = async (
     pluginId: string,
     integrationId: string,
@@ -460,6 +517,76 @@ export const PluginsView: React.FC = () => {
           <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
           <span>{notice}</span>
         </div>
+      )}
+
+      {(postAuthDiscovering || postAuthModels !== null) && (
+        <WobblyCard decoration="tape" className="p-5">
+          <div className="flex flex-col md:flex-row md:items-start gap-4">
+            <div className="flex-1">
+              <h3 className="text-xl font-heading font-bold">Finish integration setup</h3>
+              <p className="text-sm font-body text-[var(--ink)]/75">
+                The account is connected. Kinetix is using the provider&apos;s authenticated
+                discovery path; choose which newly advertised models to enable.
+              </p>
+            </div>
+            {postAuthDiscovering ? (
+              <SketchBadge variant="blue">Discovering…</SketchBadge>
+            ) : (
+              <SketchButton
+                variant="secondary"
+                disabled={busy !== null}
+                onClick={() => {
+                  setPostAuthModels(null);
+                  setPostAuthProviderId(null);
+                }}
+              >
+                Done
+              </SketchButton>
+            )}
+          </div>
+
+          {postAuthDiscovering ? (
+            <div className="mt-4 text-sm font-mono text-[var(--ink)]/60">
+              Fetching the live model catalog…
+            </div>
+          ) : postAuthModels && postAuthModels.length > 0 ? (
+            <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
+              {postAuthModels.map((model) => (
+                <div
+                  key={model.id}
+                  className="p-3 border-2 border-[var(--ink)]/25 bg-[var(--surface)] flex items-start justify-between gap-3"
+                >
+                  <div className="min-w-0">
+                    <div className="font-heading font-bold break-words">
+                      {model.display_name || model.id}
+                    </div>
+                    <code className="text-xs break-all text-[var(--ink)]/60">{model.id}</code>
+                    <div className="mt-1 text-xs font-mono text-[var(--ink)]/55">
+                      {model.context_window
+                        ? `${model.context_window.toLocaleString()} ctx`
+                        : 'context unknown'}
+                      {' · '}
+                      {model.max_output_tokens
+                        ? `${model.max_output_tokens.toLocaleString()} max output`
+                        : 'max output unknown'}
+                    </div>
+                  </div>
+                  <SketchButton
+                    variant="primary"
+                    disabled={busy !== null}
+                    onClick={() => void importPostAuthModel(model)}
+                  >
+                    {busy === `post-auth-model:${model.id}` ? 'Importing…' : 'Import'}
+                  </SketchButton>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-4 text-sm font-body text-[var(--ink)]/70">
+              No new models were advertised. Models already configured on this provider were left unchanged.
+            </div>
+          )}
+        </WobblyCard>
       )}
 
       {showInstall && (
