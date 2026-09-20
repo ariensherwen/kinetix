@@ -19,6 +19,8 @@ pub enum Capability {
     CredentialStrategy,
     AuthFlow,
     ModelSource,
+    /// Credential-aware discovery through the optional plugin-model-source-v2 world.
+    ModelSourceV2,
     ProviderAdapter,
     RoutingFacts,
     HealthProbe,
@@ -32,6 +34,7 @@ impl Capability {
             Capability::CredentialStrategy => "credential_strategies",
             Capability::AuthFlow => "auth_flows",
             Capability::ModelSource => "model_sources",
+            Capability::ModelSourceV2 => "model_sources_v2",
             Capability::ProviderAdapter => "provider_adapters",
             Capability::RoutingFacts => "routing_facts",
             Capability::HealthProbe => "health_probes",
@@ -210,6 +213,8 @@ pub struct Integration {
     #[serde(default)]
     pub model_source: Option<String>,
     #[serde(default)]
+    pub model_source_v2: Option<String>,
+    #[serde(default)]
     pub provider: Option<IntegrationProvider>,
 }
 
@@ -292,6 +297,8 @@ pub struct Provides {
     #[serde(default)]
     pub model_sources: Vec<String>,
     #[serde(default)]
+    pub model_sources_v2: Vec<String>,
+    #[serde(default)]
     pub provider_adapters: Vec<String>,
     #[serde(default)]
     pub routing_facts: Vec<String>,
@@ -315,6 +322,7 @@ impl Provides {
         add(Capability::CredentialStrategy, &self.credential_strategies);
         add(Capability::AuthFlow, &self.auth_flows);
         add(Capability::ModelSource, &self.model_sources);
+        add(Capability::ModelSourceV2, &self.model_sources_v2);
         add(Capability::ProviderAdapter, &self.provider_adapters);
         add(Capability::RoutingFacts, &self.routing_facts);
         add(Capability::HealthProbe, &self.health_probes);
