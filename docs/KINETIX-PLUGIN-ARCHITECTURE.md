@@ -769,6 +769,21 @@ Existing in-flight requests retain the old snapshot.
 Removing/disabling a plugin prevents new requests from referencing it but does not invalidate an
 already-owned invocation needed by an in-flight request.
 
+### 13.1 Compiled component cache
+
+Kinetix caches one compiled Wasmtime `Component` per installed plugin, tagged
+with the active package SHA-256. Install and rollback populate the cache;
+process restart warms it lazily on first use. Upgrade/rollback replace the
+entry and uninstall evicts it.
+
+Only immutable compiled code is reused. Kinetix deliberately creates a fresh
+Store and guest instance for every invocation so approved permissions, resource
+limits, outbound counters, and epoch deadlines are always derived from current
+host state. The cache therefore removes repeated WebAssembly compilation from
+the request path without caching runtime authority.
+
+Cache hit/miss counters are included in the plugin metrics surface.
+
 ## 14. Resource limits
 
 Start conservative and configurable by host policy.
