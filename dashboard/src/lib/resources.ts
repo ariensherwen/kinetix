@@ -110,6 +110,7 @@ export interface PluginIntegration {
   credential_strategy?: string | null;
   auth_flow?: string | null;
   model_source?: string | null;
+  model_source_v2?: string | null;
   provider?: PluginIntegrationProvider | null;
 }
 
