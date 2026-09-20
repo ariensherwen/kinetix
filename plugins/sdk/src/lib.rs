@@ -29,6 +29,15 @@ pub mod bindings {
     });
 }
 
+/// Bindings for optional credential-aware model discovery.
+pub mod model_source_v2 {
+    wit_bindgen::generate!({
+        path: "wit",
+        world: "plugin-model-source-v2",
+        pub_export_macro: true,
+    });
+}
+
 /// Bindings for the optional browser/account authorization world.
 pub mod auth {
     wit_bindgen::generate!({
