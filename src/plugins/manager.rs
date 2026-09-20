@@ -825,6 +825,7 @@ impl PluginManager {
             storage_quota: limits.storage,
             max_outbound_requests: limits.max_outbound_requests,
             max_http_body: limits.max_http_body,
+            http_timeout: Duration::from_millis(limits.wall_time_ms.max(1)),
             adapter_stream: adapter,
             buffered_http_allowed,
             outbound_count: 0,
