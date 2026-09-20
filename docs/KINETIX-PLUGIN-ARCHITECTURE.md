@@ -771,6 +771,35 @@ Routing facts are invoked inline on the request path but must stay within their 
 §6.4 the `pure` model does no network work, and the `cached` model reads a precomputed snapshot.
 Health probes (10 s) and model discovery (30 s) run off the request path.
 
+## 14.1 Catalog distribution and publisher trust
+
+The official catalog is a discovery index, not a signing authority. Package
+trust is anchored separately in a compiled publisher-key store.
+
+A catalog install is accepted only after this chain succeeds:
+
+```text
+catalog id
+ -> embedded catalog entry
+ -> HTTPS URL + redirect-host allow-list
+ -> bounded download
+ -> exact catalog SHA-256
+ -> package manifest id/version match
+ -> Ed25519 signature verified by separately trusted publisher key
+ -> normal install pipeline
+ -> installed disabled
+ -> explicit permission review
+```
+
+The dashboard cannot submit arbitrary URLs or publisher keys for catalog
+installation. Redirects are followed manually so every destination remains
+HTTPS and inside the entry's explicit host allow-list. Existing local upload
+and server-path installation remain separate operator workflows.
+
+Signing private keys never ship with Kinetix. Release tooling consumes them
+only from an operator-owned local key file or CI secret and publishes
+`signature.ed25519` inside the deterministic `.kxp`.
+
 ## 15. Plugin circuit breaker
 
 Per plugin:
