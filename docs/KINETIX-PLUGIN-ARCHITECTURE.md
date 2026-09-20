@@ -592,18 +592,25 @@ Validation pipeline:
 
 ```text
 plugin request
+ -> URL parse + HTTPS + no userinfo
  -> manifest hostname check
- -> URL parse
- -> credential-host binding check
+ -> request-header authority/hop-by-hop rejection
  -> DNS resolution
- -> private/link-local/metadata rejection
- -> connect-time resolved-IP recheck
- -> TLS verification
- -> redirect policy
- -> per-hop revalidation
- -> size/time limits
+ -> reject if any destination is private/link-local/metadata/special-use
+ -> pin the HTTP client to exactly the checked IP set
+ -> system proxy disabled
+ -> TLS verification against the original hostname
+ -> redirects disabled
+ -> credential scope/host enforcement
+ -> size/time/request-count limits
  -> request
 ```
+
+The DNS result is pinned into the request client after validation, closing the
+resolve-then-connect rebinding window. Plugins cannot override `Host` or
+hop-by-hop/proxy headers, and host-mediated plugin HTTP never follows redirects;
+a plugin must explicitly request each allowed destination as a separate
+host-authorized call.
 
 No wildcard `network = true`. `network_hosts` is always an explicit list.
 
