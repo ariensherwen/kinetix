@@ -315,6 +315,21 @@ Core rules remain:
 - `raw_metadata` is bounded by the returned-value limit (§14) and is kept only for admin inspection,
   never promoted into canonical model fields without an explicit import action.
 
+### 6.2.1 Account-agnostic discovery credential
+
+`ModelSource::discover` is intentionally account-agnostic. A model source that
+needs the provider's preferred account may request the reserved named credential
+`provider-default:<provider-id>` through `host-credential.read`.
+
+The host resolves it only after the normal approved credential-scope check and
+selects the highest-priority non-disabled account for that provider. This named
+credential is read-only: it is not accepted by generic signing or lease calls.
+This preserves the v1 WIT ABI while avoiding arbitrary credential lookup.
+
+Discovery metadata is observational. Plugin-provided capability/raw metadata is
+preserved in the discovery record but does not overwrite administrator-edited
+model configuration.
+
 ### 6.3 ProviderAdapter
 
 Use only when existing outbound wire formats are insufficient.
