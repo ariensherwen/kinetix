@@ -148,7 +148,7 @@ network_hosts = [
   "api.foo.example",
   "auth.foo.example"
 ]
-credential_scopes = ["provider:foo"]
+credential_scopes = ["credential_strategy:foo-oauth"]
 
 [limits]
 memory = "64MiB"
@@ -207,7 +207,27 @@ dashboard present a product-level integration such as **Google Antigravity**
 instead of requiring operators to manually compose `wire_plugin` and
 `credential_plugin` references.
 
-### 6.0.2 AuthFlow
+### 6.0.2 Integration provider templates
+
+An Integration may optionally describe the host-owned provider it needs:
+base URL, host wire class, auth scheme, timeout/capability defaults, model path,
+redirect policy, credential hosts, and static headers. When a
+`provider_adapter` is present, the template uses `wire_format = "plugin"`;
+the concrete adapter name remains the Integration's capability binding.
+
+Provider creation is a separate authenticated admin action. Core re-validates
+outbound URL policy, verifies the plugin is enabled with its declared permissions
+approved, resolves each derived capability binding, and creates the provider
+with `allow_insecure_tls = false`. Setup is idempotent for an existing matching
+base URL and binding set.
+
+Generated provider ids cannot be known in a signed manifest. For this case,
+`credential_scopes` supports `credential_strategy:<name>`. At credential-use
+time the host authorizes the scope only when the target provider's
+`credential_plugin` is exactly `plugin:<this-plugin>/<name>`. Literal
+`provider:<id>` and wildcard scopes remain available for other use cases.
+
+### 6.0.3 AuthFlow
 
 AuthFlow provisions an account through a provider-owned browser authorization
 flow. It is a separate `plugin-auth` world so existing plugin API v1
