@@ -25,6 +25,9 @@ pub struct HostPolicy {
     pub max_outbound_requests: u32,
     pub max_http_body: u64,
     pub max_storage: u64,
+    /// Operator-owned development override matching KINETIX_ALLOW_PRIVATE_UPSTREAMS.
+    /// Plugin manifests cannot grant this authority.
+    pub allow_private_network: bool,
 }
 
 impl Default for HostPolicy {
@@ -35,6 +38,7 @@ impl Default for HostPolicy {
             max_outbound_requests: 4,
             max_http_body: 4 * 1024 * 1024,
             max_storage: 10 * 1024 * 1024,
+            allow_private_network: false,
         }
     }
 }
