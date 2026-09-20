@@ -736,10 +736,9 @@ impl PluginManager {
         {
             return false;
         }
-        match store::runtime_state(&self.inner.pool, id).await {
-            Ok(Some(state)) => !matches!(state.circuit(), CircuitState::Open),
-            _ => true,
-        }
+        store::circuit_ready(&self.inner.pool, id)
+            .await
+            .unwrap_or(false)
     }
 
     /// Whether the plugin provides the named capability.
@@ -782,6 +781,20 @@ impl PluginManager {
     // -----------------------------------------------------------------------
     // Invocation plumbing
     // -----------------------------------------------------------------------
+
+    async fn ensure_circuit_ready(&self, id: &str) -> Result<()> {
+        if !store::circuit_ready(&self.inner.pool, id).await? {
+            bail!("plugin '{id}' circuit is open or already half-open");
+        }
+        Ok(())
+    }
+
+    async fn claim_circuit_probe(&self, id: &str) -> Result<()> {
+        if !store::claim_circuit_probe(&self.inner.pool, id).await? {
+            bail!("plugin '{id}' circuit is open or another half-open probe is in flight");
+        }
+        Ok(())
+    }
 
     fn new_store(
         &self,
@@ -857,6 +870,7 @@ impl PluginManager {
             .manifest()
             .ok_or_else(|| anyhow!("plugin '{id}' has an unreadable manifest"))?;
         let grants = self.ensure_permissions_approved(id, &manifest).await?;
+        self.ensure_circuit_ready(id).await?;
         let limits = manifest::effective_limits(&manifest, self.inner.policy)?;
         let component = self.inner.runtime.compile(&row.component)?;
         let linker = self.inner.runtime.linker()?;
@@ -866,6 +880,7 @@ impl PluginManager {
             .runtime
             .instantiate(&linker, &mut store, &component)
             .await?;
+        self.claim_circuit_probe(id).await?;
         Ok(Prepared {
             store,
             plugin,
@@ -886,6 +901,7 @@ impl PluginManager {
             .manifest()
             .ok_or_else(|| anyhow!("plugin '{id}' has an unreadable manifest"))?;
         let grants = self.ensure_permissions_approved(id, &manifest).await?;
+        self.ensure_circuit_ready(id).await?;
         let limits = manifest::effective_limits(&manifest, self.inner.policy)?;
         let component = self.inner.runtime.compile(&row.component)?;
         let linker = self.inner.runtime.linker()?;
@@ -895,6 +911,7 @@ impl PluginManager {
             .runtime
             .instantiate_auth(&linker, &mut store, &component)
             .await?;
+        self.claim_circuit_probe(id).await?;
         Ok(AuthPrepared {
             store,
             plugin,
@@ -1003,6 +1020,7 @@ impl PluginManager {
             .manifest()
             .ok_or_else(|| anyhow!("plugin '{id}' has an unreadable manifest"))?;
         let grants = self.ensure_permissions_approved(id, &manifest).await?;
+        self.ensure_circuit_ready(id).await?;
         let limits = manifest::effective_limits(&manifest, self.inner.policy)?;
         let component = self.inner.runtime.compile(&row.component)?;
         let linker = self.inner.runtime.linker()?;
@@ -1012,6 +1030,7 @@ impl PluginManager {
             .runtime
             .instantiate_adapter(&linker, &mut store, &component)
             .await?;
+        self.claim_circuit_probe(id).await?;
         Ok(AdapterPrepared {
             store,
             plugin,
@@ -1194,6 +1213,10 @@ impl PluginManager {
             self.inner.timeouts.fetch_add(1, Relaxed);
         }
         if !fault.counts_against_circuit() {
+            // A structured plugin/upstream error proves the guest executed
+            // successfully. It breaks any consecutive runtime-fault streak and
+            // closes a half-open probe.
+            let _ = store::clear_plugin_failures(&self.inner.pool, id).await;
             return;
         }
         let _ = store::record_plugin_failure(
@@ -1490,6 +1513,16 @@ impl PluginManager {
                     self.inner
                         .cancellations
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    // Cancellation is not a plugin fault, but if this was the
+                    // sole half-open probe it also is not recovery evidence.
+                    // Reopen for another cooldown instead of stranding the
+                    // breaker in half_open forever.
+                    let _ = store::reopen_plugin_circuit(
+                        &self.inner.pool,
+                        id,
+                        CIRCUIT_OPEN_SECS,
+                    )
+                    .await;
                     return Err(PluginFault::Cancelled);
                 }
                 self.record_fault(id, &fault).await;
