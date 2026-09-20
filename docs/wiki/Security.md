@@ -23,7 +23,7 @@ policy. It listens on localhost only, with cloudflared as the sole ingress.
 | SSRF / DNS rebinding / malicious redirect | HTTPS-only, blocked internal/metadata ranges, connect-time DNS re-check, zero-redirect default, credential host binding. |
 | Topology leakage | Serving account/provider hidden from clients; opaque `X-Kinetix-Route-Id` only. |
 | Control-plane failure | Data plane serves from an immutable snapshot; reads keep working; counters fail open. |
-| Malicious or faulty plugin | WebAssembly component isolation (Wasmtime 48), zero ambient authority, all-or-nothing permissions, encrypted private KV, epoch interruption, and per-plugin circuit breaker. |
+| Malicious or faulty plugin | WebAssembly component isolation (Wasmtime 48), zero ambient authority, all-or-nothing permissions, encrypted private KV, epoch interruption, and per-plugin circuit breaker. Buffered plugin HTTP is hostname-allowlisted, DNS-checked against blocked ranges, pinned to the checked addresses, TLS-verified, no-proxy, and zero-redirect. |
 
 Out of scope: hostile insiders with shell/root, upstream-provider compromise, and
 hard multi-tenant isolation.
