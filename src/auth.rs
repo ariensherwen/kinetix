@@ -30,6 +30,7 @@ pub struct PluginAuthSession {
     pub plugin_id: String,
     pub flow_name: String,
     pub provider_id: String,
+    pub credential_binding: String,
     pub redirect_uri: String,
     pub pkce_verifier: String,
     expires_at: Instant,
@@ -57,6 +58,7 @@ impl PluginAuthSessions {
         plugin_id: &str,
         flow_name: &str,
         provider_id: &str,
+        credential_binding: &str,
         redirect_uri: &str,
     ) -> PluginAuthStart {
         use base64::Engine;
@@ -83,6 +85,7 @@ impl PluginAuthSessions {
                 plugin_id: plugin_id.to_string(),
                 flow_name: flow_name.to_string(),
                 provider_id: provider_id.to_string(),
+                credential_binding: credential_binding.to_string(),
                 redirect_uri: redirect_uri.to_string(),
                 pkce_verifier,
                 expires_at: now + PLUGIN_AUTH_TTL,
@@ -389,12 +392,14 @@ mod plugin_auth_tests {
             "dev.example.plugin",
             "login",
             "prov_1",
+            "plugin:dev.example.plugin/login-credential",
             "https://example.test/admin/api/plugins/auth/callback",
         );
         let second = sessions.create(
             "dev.example.plugin",
             "login",
             "prov_1",
+            "plugin:dev.example.plugin/login-credential",
             "https://example.test/admin/api/plugins/auth/callback",
         );
 
@@ -405,6 +410,10 @@ mod plugin_auth_tests {
         assert_eq!(session.plugin_id, "dev.example.plugin");
         assert_eq!(session.flow_name, "login");
         assert_eq!(session.provider_id, "prov_1");
+        assert_eq!(
+            session.credential_binding,
+            "plugin:dev.example.plugin/login-credential"
+        );
         assert!(!session.pkce_verifier.is_empty());
 
         assert!(
@@ -421,6 +430,7 @@ mod plugin_auth_tests {
             "dev.example.plugin",
             "login",
             "prov_1",
+            "plugin:dev.example.plugin/login-credential",
             "https://example.test/callback",
         );
         sessions.revoke(&pending.state);
