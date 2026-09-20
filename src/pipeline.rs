@@ -194,9 +194,15 @@ pub async fn run(
         })
         .to_string();
         state.spawn_hook(move || async move {
+            let mut hooks = tokio::task::JoinSet::new();
             for id in manager.plugins_with_hook("on_request_normalized").await {
-                let _ = manager.hook_request_normalized(&id, &json).await;
+                let manager = manager.clone();
+                let json = json.clone();
+                hooks.spawn(async move {
+                    let _ = manager.hook_request_normalized(&id, &json).await;
+                });
             }
+            while hooks.join_next().await.is_some() {}
         });
     }
 
@@ -258,9 +264,15 @@ pub async fn run(
                     .to_string();
                     let manager = manager.clone();
                     state.spawn_hook(move || async move {
+                        let mut hooks = tokio::task::JoinSet::new();
                         for id in manager.plugins_with_hook("on_target_candidate").await {
-                            let _ = manager.hook_target_candidate(&id, &json).await;
+                            let manager = manager.clone();
+                            let json = json.clone();
+                            hooks.spawn(async move {
+                                let _ = manager.hook_target_candidate(&id, &json).await;
+                            });
                         }
+                        while hooks.join_next().await.is_some() {}
                     });
                 }
             }
@@ -2089,9 +2101,15 @@ async fn finalize_log(
         })
         .to_string();
         state.spawn_hook(move || async move {
+            let mut hooks = tokio::task::JoinSet::new();
             for id in manager.plugins_with_hook("on_usage_finalized").await {
-                let _ = manager.hook_usage_finalized(&id, &json).await;
+                let manager = manager.clone();
+                let json = json.clone();
+                hooks.spawn(async move {
+                    let _ = manager.hook_usage_finalized(&id, &json).await;
+                });
             }
+            while hooks.join_next().await.is_some() {}
         });
     }
 
