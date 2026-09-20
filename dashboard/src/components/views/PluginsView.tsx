@@ -473,6 +473,11 @@ export const PluginsView: React.FC = () => {
                               auth:{integration.credential_strategy}
                             </code>
                           )}
+                          {integration.auth_flow && (
+                            <code className="text-xs bg-[var(--erased)] px-2 py-1">
+                              login:{integration.auth_flow}
+                            </code>
+                          )}
                           {integration.model_source && (
                             <code className="text-xs bg-[var(--erased)] px-2 py-1">
                               models:{integration.model_source}
