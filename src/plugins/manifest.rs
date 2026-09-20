@@ -112,6 +112,7 @@ pub fn validate(manifest: Manifest, policy: HostPolicy) -> Result<ValidatedManif
             && integration.credential_strategy.is_none()
             && integration.auth_flow.is_none()
             && integration.model_source.is_none()
+            && integration.model_source_v2.is_none()
         {
             bail!(
                 "integration '{}' must reference at least one provided capability",
@@ -153,6 +154,21 @@ pub fn validate(manifest: Manifest, policy: HostPolicy) -> Result<ValidatedManif
                     name
                 );
             }
+        }
+        if let Some(name) = &integration.model_source_v2 {
+            if !manifest.provides.model_sources_v2.contains(name) {
+                bail!(
+                    "integration '{}' references unknown model_source_v2 '{}'",
+                    integration.id,
+                    name
+                );
+            }
+        }
+        if integration.model_source.is_some() && integration.model_source_v2.is_some() {
+            bail!(
+                "integration '{}' may declare only one of model_source or model_source_v2",
+                integration.id
+            );
         }
         if let Some(provider) = &integration.provider {
             let parsed = url::Url::parse(&provider.base_url).map_err(|e| {
