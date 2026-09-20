@@ -578,6 +578,114 @@ impl PluginManager {
         })
     }
 
+    /// Instantiate the optional account-authorization world for one call.
+    async fn prepare_auth(&self, id: &str) -> Result<AuthPrepared> {
+        let row = self
+            .get(id)
+            .await?
+            .ok_or_else(|| anyhow!("plugin '{id}' is not installed"))?;
+        if !row.status().is_enabled() {
+            bail!("plugin '{id}' is not enabled");
+        }
+        let manifest = row
+            .manifest()
+            .ok_or_else(|| anyhow!("plugin '{id}' has an unreadable manifest"))?;
+        let grants = self.ensure_permissions_approved(id, &manifest).await?;
+        let limits = manifest::effective_limits(&manifest, self.inner.policy)?;
+        let component = self.inner.runtime.compile(&row.component)?;
+        let linker = self.inner.runtime.linker()?;
+        let mut store = self.new_store(&row, &limits, &grants, false, true);
+        let plugin = self
+            .inner
+            .runtime
+            .instantiate_auth(&linker, &mut store, &component)
+            .await?;
+        Ok(AuthPrepared {
+            store,
+            plugin,
+            wall_time: Duration::from_millis(limits.wall_time_ms),
+        })
+    }
+
+    /// Start a named plugin-provided account authorization flow.
+    pub async fn auth_begin(
+        &self,
+        id: &str,
+        flow_name: &str,
+        redirect_uri: &str,
+        state: &str,
+        pkce_challenge: Option<&str>,
+    ) -> Result<String, PluginFault> {
+        if !self.provides(id, Capability::AuthFlow, flow_name).await {
+            return Err(PluginFault::InvalidResult(format!(
+                "plugin '{id}' does not provide auth flow '{flow_name}'"
+            )));
+        }
+        self.bump_invocation();
+        let _permit = self.inner.semaphore.acquire().await;
+        let mut prepared = self
+            .prepare_auth(id)
+            .await
+            .map_err(|e| PluginFault::Internal(e.to_string()))?;
+        let plugin = prepared.plugin;
+        let rt = self.inner.runtime.clone();
+        let _guard = rt.arm_deadline(&mut prepared.store, prepared.wall_time);
+        let result = plugin
+            .auth_flow()
+            .call_begin(
+                &mut prepared.store,
+                flow_name,
+                redirect_uri,
+                state,
+                pkce_challenge,
+            )
+            .await
+            .map_err(map_call_error)
+            .and_then(map_auth_result);
+        self.settle(id, result).await
+    }
+
+    /// Exchange a browser callback code for host-persistable credential JSON.
+    pub async fn auth_exchange(
+        &self,
+        id: &str,
+        flow_name: &str,
+        code: &str,
+        redirect_uri: &str,
+        pkce_verifier: Option<&str>,
+    ) -> Result<
+        crate::plugins::runtime::auth_bindings::kinetix::plugin::types::AuthResult,
+        PluginFault,
+    > {
+        if !self.provides(id, Capability::AuthFlow, flow_name).await {
+            return Err(PluginFault::InvalidResult(format!(
+                "plugin '{id}' does not provide auth flow '{flow_name}'"
+            )));
+        }
+        self.bump_invocation();
+        let _permit = self.inner.semaphore.acquire().await;
+        let mut prepared = self
+            .prepare_auth(id)
+            .await
+            .map_err(|e| PluginFault::Internal(e.to_string()))?;
+        let plugin = prepared.plugin;
+        let rt = self.inner.runtime.clone();
+        let _guard = rt.arm_deadline(&mut prepared.store, prepared.wall_time);
+        let result = plugin
+            .auth_flow()
+            .call_exchange(
+                &mut prepared.store,
+                flow_name,
+                code,
+                redirect_uri,
+                pkce_verifier,
+            )
+            .await
+            .map_err(map_call_error)
+            .and_then(map_auth_result);
+        self.settle(id, result).await
+    }
+
     // -----------------------------------------------------------------------
     // ProviderAdapter invocation (§6.3, §7.1)
     //
@@ -1121,6 +1229,12 @@ struct Prepared {
     wall_time: Duration,
 }
 
+struct AuthPrepared {
+    store: wasmtime::Store<HostCtx>,
+    plugin: crate::plugins::runtime::auth_bindings::PluginAuth,
+    wall_time: Duration,
+}
+
 struct AdapterPrepared {
     store: wasmtime::Store<HostCtx>,
     plugin: crate::plugins::runtime::adapter_bindings::PluginAdapter,
@@ -1140,6 +1254,20 @@ fn map_call_error(e: wasmtime::Error) -> PluginFault {
 /// Map the guest's `Result<T, PluginError>` into a [`PluginFault`].
 fn map_plugin_result<T>(r: Result<T, wit::types::PluginError>) -> Result<T, PluginFault> {
     r.map_err(|e| PluginFault::PluginError {
+        code: e.code,
+        message: e.message,
+        retryable: e.retryable,
+    })
+}
+
+/// Like [`map_plugin_result`] but for the separately-bound auth world.
+fn map_auth_result<T>(
+    result: Result<
+        T,
+        crate::plugins::runtime::auth_bindings::kinetix::plugin::types::PluginError,
+    >,
+) -> Result<T, PluginFault> {
+    result.map_err(|e| PluginFault::PluginError {
         code: e.code,
         message: e.message,
         retryable: e.retryable,
