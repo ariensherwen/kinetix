@@ -128,7 +128,7 @@ credential_strategy = "antigravity-oauth"
 auth_flow = "antigravity"
 
 [permissions]
-network_hosts = ["oauth2.googleapis.com", "www.googleapis.com"]
+network_hosts = ["accounts.google.com", "oauth2.googleapis.com", "www.googleapis.com"]
 credential_scopes = ["provider:antigravity"]
 credential_read = true
 
@@ -166,7 +166,8 @@ Kinetix owns the security-sensitive browser session mechanics:
 
 The plugin owns provider-specific behavior:
 
-- constructing the provider authorization URL,
+- constructing the provider authorization URL (its host must also be present
+  in the reviewed `network_hosts` set),
 - exchanging the callback code,
 - optional provider user-info/onboarding calls through approved `host-http`,
 - mapping the result to the provider credential JSON consumed by its
