@@ -29,6 +29,17 @@ pub mod bindings {
     });
 }
 
+/// Bindings for the optional `plugin-auth` world. Existing API v1 plugins do
+/// not need to implement this world unless their manifest declares an
+/// `auth-flow` capability.
+pub mod auth {
+    wit_bindgen::generate!({
+        path: "wit",
+        world: "plugin-auth",
+        pub_export_macro: true,
+    });
+}
+
 /// Bindings for the `plugin-adapter` world (§6.3). A component that provides a
 /// `provider-adapter` capability implements `adapter::exports::provider_adapter::Guest`
 /// and invokes `adapter::export!(Component with_types_in kinetix_plugin_sdk::adapter)`.
