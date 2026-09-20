@@ -913,19 +913,40 @@ export const PluginsView: React.FC = () => {
                 <WobblyCard variant="muted" className="p-5">
                   <h4 className="text-lg font-heading font-bold mb-3">Retained packages</h4>
                   <div className="space-y-2">
-                    {detail.packages.map((pkg) => (
-                      <div
-                        key={pkg.package_sha256}
-                        className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 border-b border-dashed border-[var(--ink)]/20 pb-2"
-                      >
-                        <SketchBadge variant={pkg.package_sha256 === selected.sha256 ? 'green' : 'default'}>
-                          v{pkg.version}
-                        </SketchBadge>
-                        <code className="text-xs break-all self-center">{pkg.package_sha256}</code>
-                        <span className="text-xs text-[var(--ink)]/55">Stored package</span>
-                        <code className="text-xs text-[var(--ink)]/55 break-all">{pkg.package_path}</code>
-                      </div>
-                    ))}
+                    {detail.packages.map((pkg) => {
+                      const current = pkg.package_sha256 === selected.sha256;
+                      return (
+                        <div
+                          key={pkg.package_sha256}
+                          className="grid grid-cols-[auto_1fr_auto] gap-x-3 gap-y-1 border-b border-dashed border-[var(--ink)]/20 pb-2"
+                        >
+                          <SketchBadge variant={current ? 'green' : 'default'}>
+                            v{pkg.version}
+                          </SketchBadge>
+                          <code className="text-xs break-all self-center">{pkg.package_sha256}</code>
+                          {current ? (
+                            <SketchBadge variant="green">Active</SketchBadge>
+                          ) : (
+                            <SketchButton
+                              variant="secondary"
+                              disabled={busy !== null}
+                              onClick={() =>
+                                void mutate(
+                                  `rollback:${pkg.package_sha256}`,
+                                  () => Kinetix.rollbackPlugin(selected.id, pkg.package_sha256),
+                                  `Rolled back to v${pkg.version}. Review permissions before enabling.`,
+                                )
+                              }
+                            >
+                              {busy === `rollback:${pkg.package_sha256}` ? 'Restoring…' : 'Roll back'}
+                            </SketchButton>
+                          )}
+                          <span className="text-xs text-[var(--ink)]/55">Stored package</span>
+                          <code className="text-xs text-[var(--ink)]/55 break-all">{pkg.package_path}</code>
+                          <span className="text-xs font-mono text-[var(--ink)]/55">{pkg.source}</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </WobblyCard>
               )}
