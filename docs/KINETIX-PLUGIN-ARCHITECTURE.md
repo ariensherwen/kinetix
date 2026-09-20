@@ -229,6 +229,11 @@ Security ownership is split deliberately:
 - **plugin** constructs the provider URL and performs provider-specific token
   exchange/post-exchange calls through its approved `host-http` authority.
 
+Core additionally requires the browser authorization URL to use HTTPS and its
+destination host to match the plugin's reviewed `network_hosts` declaration.
+This prevents an enabled auth-flow plugin from redirecting an administrator to
+an undeclared destination.
+
 A callback may only enroll into a provider whose `credential_plugin` exactly
 matches the credential strategy paired with the integration. The state token
 is consumed before exchange so callback replay fails closed.
