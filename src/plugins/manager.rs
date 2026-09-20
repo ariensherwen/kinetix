@@ -309,11 +309,7 @@ impl PluginManager {
         )
         .await?;
 
-        self.remember_component(
-            &validated.manifest.id,
-            &pkg.package_sha256,
-            compiled,
-        );
+        self.remember_component(&validated.manifest.id, &pkg.package_sha256, compiled);
 
         Ok(InstallOutcome {
             id: validated.manifest.id.clone(),
