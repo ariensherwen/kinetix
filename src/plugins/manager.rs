@@ -305,7 +305,7 @@ impl PluginManager {
         let grants = self.ensure_permissions_approved(id, &manifest).await?;
         let limits = manifest::effective_limits(&manifest, self.inner.policy)?;
         // Instantiate to prove the component links against our host API.
-        let mut store = self.new_store(&row, &limits, &grants, false);
+        let mut store = self.new_store(&row, &limits, &grants, false, true);
         let component = self.inner.runtime.compile(&row.component)?;
         let linker = self.inner.runtime.linker()?;
         let _ = self
@@ -496,6 +496,7 @@ impl PluginManager {
         limits: &manifest::EffectiveLimits,
         grants: &[PermissionGrant],
         adapter: bool,
+        buffered_http_allowed: bool,
     ) -> wasmtime::Store<HostCtx> {
         let manifest = row.manifest().unwrap_or_else(|| Manifest {
             manifest_version: 1,
@@ -538,7 +539,7 @@ impl PluginManager {
             max_outbound_requests: limits.max_outbound_requests,
             max_http_body: limits.max_http_body,
             adapter_stream: adapter,
-            routing_facts_pure: manifest.routing_facts_mode != "cached",
+            buffered_http_allowed,
             outbound_count: 0,
             http: self.inner.http.clone(),
             backing: self.inner.backing.clone(),
@@ -549,7 +550,7 @@ impl PluginManager {
     }
 
     /// Prepare a ready-to-call instance for a plugin.
-    async fn prepare(&self, id: &str, adapter: bool) -> Result<Prepared> {
+    async fn prepare(&self, id: &str, buffered_http_allowed: bool) -> Result<Prepared> {
         let row = self
             .get(id)
             .await?
@@ -564,7 +565,7 @@ impl PluginManager {
         let limits = manifest::effective_limits(&manifest, self.inner.policy)?;
         let component = self.inner.runtime.compile(&row.component)?;
         let linker = self.inner.runtime.linker()?;
-        let mut store = self.new_store(&row, &limits, &grants, adapter);
+        let mut store = self.new_store(&row, &limits, &grants, false, buffered_http_allowed);
         let plugin = self
             .inner
             .runtime
@@ -602,7 +603,7 @@ impl PluginManager {
         let limits = manifest::effective_limits(&manifest, self.inner.policy)?;
         let component = self.inner.runtime.compile(&row.component)?;
         let linker = self.inner.runtime.linker()?;
-        let mut store = self.new_store(&row, &limits, &grants, true);
+        let mut store = self.new_store(&row, &limits, &grants, true, false);
         let plugin = self
             .inner
             .runtime
@@ -823,7 +824,7 @@ impl PluginManager {
         self.bump_invocation();
         let _permit = self.inner.semaphore.acquire().await;
         let mut p = self
-            .prepare(id, false)
+            .prepare(id, true)
             .await
             .map_err(|e| PluginFault::Internal(e.to_string()))?;
         let plugin = p.plugin;
@@ -849,7 +850,7 @@ impl PluginManager {
         self.bump_invocation();
         let _permit = self.inner.semaphore.acquire().await;
         let mut p = self
-            .prepare(id, false)
+            .prepare(id, true)
             .await
             .map_err(|e| PluginFault::Internal(e.to_string()))?;
         let plugin = p.plugin;
@@ -874,7 +875,7 @@ impl PluginManager {
         self.bump_invocation();
         let _permit = self.inner.semaphore.acquire().await;
         let mut p = self
-            .prepare(id, false)
+            .prepare(id, true)
             .await
             .map_err(|e| PluginFault::Internal(e.to_string()))?;
         let plugin = p.plugin;
@@ -953,7 +954,7 @@ impl PluginManager {
         self.bump_invocation();
         let _permit = self.inner.semaphore.acquire().await;
         let mut p = self
-            .prepare(id, false)
+            .prepare(id, true)
             .await
             .map_err(|e| PluginFault::Internal(e.to_string()))?;
         let plugin = p.plugin;
@@ -977,7 +978,7 @@ impl PluginManager {
         self.bump_invocation();
         let _permit = self.inner.semaphore.acquire().await;
         let mut p = self
-            .prepare(id, false)
+            .prepare(id, true)
             .await
             .map_err(|e| PluginFault::Internal(e.to_string()))?;
         let plugin = p.plugin;
@@ -1002,7 +1003,7 @@ impl PluginManager {
         self.bump_invocation();
         let _permit = self.inner.semaphore.acquire().await;
         let mut p = self
-            .prepare(id, false)
+            .prepare(id, true)
             .await
             .map_err(|e| PluginFault::Internal(e.to_string()))?;
         let plugin = p.plugin;
@@ -1030,7 +1031,7 @@ impl PluginManager {
         let component = self.inner.runtime.compile(&row.component)?;
         let linker = self.inner.runtime.linker()?;
         // Validation proves linking with no runtime authority granted.
-        let mut store = self.new_store(&row, &limits, &[], false);
+        let mut store = self.new_store(&row, &limits, &[], false, false);
         let _ = self
             .inner
             .runtime
