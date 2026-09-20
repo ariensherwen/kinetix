@@ -67,6 +67,7 @@ export interface PluginIntegration {
   description: string;
   provider_adapter?: string | null;
   credential_strategy?: string | null;
+  auth_flow?: string | null;
   model_source?: string | null;
 }
 
