@@ -127,9 +127,17 @@ provider_adapter = "antigravity"
 credential_strategy = "antigravity-oauth"
 auth_flow = "antigravity"
 
+[integrations.provider]
+base_url = "https://autopush-alkalimakersuite-pa.sandbox.googleapis.com"
+wire_format = "plugin"
+auth_scheme = "bearer"
+timeout_ms = 120000
+capability_mode = "permissive"
+follow_redirects = false
+
 [permissions]
 network_hosts = ["accounts.google.com", "oauth2.googleapis.com", "www.googleapis.com"]
-credential_scopes = ["provider:antigravity"]
+credential_scopes = ["credential_strategy:antigravity-oauth"]
 credential_read = true
 
 [limits]
