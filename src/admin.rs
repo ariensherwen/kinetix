@@ -3979,7 +3979,10 @@ pub async fn setup_plugin_integration_provider(
             &credential_plugin,
             crate::plugins::Capability::CredentialStrategy,
         ),
-        (&model_source_plugin, crate::plugins::Capability::ModelSource),
+        (
+            &model_source_plugin,
+            crate::plugins::Capability::ModelSource,
+        ),
     ] {
         if !reference.is_empty()
             && manager
