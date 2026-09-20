@@ -252,7 +252,7 @@ The browser never receives access or refresh tokens from Kinetix. Provider
 client constraints remain plugin-specific: for example, the bundled
 Antigravity desktop OAuth client supports loopback callbacks only.
 
-### 6.0.3 Declarative dashboard actions
+### 6.0.4 Declarative dashboard actions
 
 Plugins may declare host-rendered `[[ui.actions]]` metadata. Actions never load
 plugin JavaScript into the dashboard origin. Instead, the dashboard renders a
