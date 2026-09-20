@@ -22,7 +22,7 @@ use super::runtime::{
     bindings, wit, DeadlineGuard, HostBacking, HostCtx, PluginFault, PluginRuntime, CONFIG_PREFIX,
 };
 use super::store::{self, PermissionGrant, PluginRow};
-use super::types::{Capability, CircuitState, Limits, Manifest, Permissions, Provided};
+use super::types::{Capability, Limits, Manifest, Permissions, Provided};
 
 /// Bounds concurrent guest invocations so a flood of one plugin cannot exhaust
 /// host threads or memory (§14).
