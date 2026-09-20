@@ -24,6 +24,7 @@ import { SquiggleDivider, SketchButton, SketchBadge } from './components/HandDra
 import { EMPTY_METRICS } from './lib/mappers';
 import { Kinetix, ExportFile, UsageDay } from './lib/resources';
 import { SettingsView } from './components/views/SettingsView';
+import { PluginsView } from './components/views/PluginsView';
 import { ApiError } from './lib/api';
 import { useTheme } from './lib/theme';
 import {
@@ -548,6 +549,8 @@ export default function App() {
         )}
 
         {activeTab === 'audit' && <AuditView logs={auditLogs} />}
+
+        {activeTab === 'plugins' && <PluginsView />}
 
         {activeTab === 'settings' && <SettingsView onLogout={handleLogout} />}
         </main>
