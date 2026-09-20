@@ -61,6 +61,25 @@ export interface PluginCapability {
   name: string;
 }
 
+export interface PluginCatalogEntry {
+  id: string;
+  name: string;
+  description: string;
+  publisher: string;
+  official: boolean;
+  homepage: string;
+  latest_version: string;
+  artifact_name: string;
+  capabilities: string[];
+  installable: boolean;
+  note?: string;
+}
+
+export interface PluginCatalogResponse {
+  schema_version: number;
+  plugins: PluginCatalogEntry[];
+}
+
 export interface PluginIntegration {
   id: string;
   name: string;
@@ -300,6 +319,8 @@ export const Kinetix = {
     const r = await api.get<{ plugins: PluginSummary[] }>('/admin/api/plugins');
     return r.plugins;
   },
+  pluginCatalog: () =>
+    api.get<PluginCatalogResponse>('/admin/api/plugins/catalog'),
   plugin: (id: string) =>
     api.get<PluginDetail>(`/admin/api/plugins/${encodeURIComponent(id)}`),
   pluginPermissions: (id: string) =>
