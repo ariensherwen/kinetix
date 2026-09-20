@@ -168,6 +168,12 @@ pub struct HostCtx {
     /// provider-adapter calls set this to false even when the plugin has approved
     /// network hosts.
     pub buffered_http_allowed: bool,
+    /// Development-only private-network override inherited from host policy.
+    pub allow_private_network: bool,
+    /// Explicit deadline for one host-http request. Host futures are not
+    /// interrupted by the guest epoch timer, so the network call must carry its
+    /// own timeout.
+    pub http_timeout: Duration,
     /// Outbound request counter for the current invocation.
     pub outbound_count: u32,
     /// The HTTP client used for host-mediated outbound requests.
@@ -391,14 +397,105 @@ fn err(code: &str, message: impl Into<String>) -> wit::types::PluginError {
 
 impl bindings::kinetix::plugin::types::Host for HostCtx {}
 
+#[derive(Debug)]
+enum PluginEgressError {
+    Denied(String),
+    Unavailable(String),
+}
+
+impl PluginEgressError {
+    fn into_plugin_error(self) -> wit::types::PluginError {
+        match self {
+            PluginEgressError::Denied(message) => err("permission_denied", message),
+            PluginEgressError::Unavailable(message) => wit::types::PluginError {
+                code: "upstream_unavailable".into(),
+                message,
+                retryable: true,
+                retry_after: None,
+                reset_at: None,
+            },
+        }
+    }
+}
+
+/// Resolve the destination immediately before the request and reject the whole
+/// answer set if any address falls in a blocked range. The returned addresses
+/// are subsequently pinned into reqwest, closing the DNS rebinding/TOCTOU gap.
+async fn resolve_plugin_destination(
+    host: &str,
+    port: u16,
+    allow_private_network: bool,
+) -> Result<Vec<std::net::SocketAddr>, PluginEgressError> {
+    let mut addrs = if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        vec![std::net::SocketAddr::new(ip, port)]
+    } else {
+        tokio::net::lookup_host((host, port))
+            .await
+            .map_err(|e| {
+                PluginEgressError::Unavailable(format!(
+                    "DNS resolution for '{host}' failed: {e}"
+                ))
+            })?
+            .collect::<Vec<_>>()
+    };
+
+    addrs.sort_unstable();
+    addrs.dedup();
+    if addrs.is_empty() {
+        return Err(PluginEgressError::Unavailable(format!(
+            "DNS resolution for '{host}' returned no addresses"
+        )));
+    }
+
+    if !allow_private_network {
+        if let Some(blocked) = addrs
+            .iter()
+            .find(|addr| crate::admin::is_blocked_ip(addr.ip()))
+        {
+            return Err(PluginEgressError::Denied(format!(
+                "host '{host}' resolves to a blocked private/reserved address ({})",
+                blocked.ip()
+            )));
+        }
+    }
+
+    Ok(addrs)
+}
+
+fn pinned_plugin_client(
+    host: &str,
+    addrs: &[std::net::SocketAddr],
+    timeout: Duration,
+) -> Result<reqwest::Client, PluginEgressError> {
+    let connect_timeout = std::cmp::min(timeout, Duration::from_secs(10));
+    let mut builder = reqwest::Client::builder()
+        .https_only(true)
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(connect_timeout)
+        .timeout(timeout)
+        .user_agent(concat!("kinetix-plugin-host/", env!("CARGO_PKG_VERSION")));
+
+    // IP literals already name the exact destination. DNS names are pinned to
+    // only the addresses that passed the policy check above; TLS SNI and
+    // certificate validation still use the original URL hostname.
+    if host.parse::<std::net::IpAddr>().is_err() {
+        builder = builder.resolve_to_addrs(host, addrs);
+    }
+
+    builder.build().map_err(|e| {
+        PluginEgressError::Unavailable(format!("building pinned HTTP client failed: {e}"))
+    })
+}
+
 impl bindings::kinetix::plugin::host_http::Host for HostCtx {
     async fn send(
         &mut self,
         req: wit::types::HttpRequest,
     ) -> anyhow::Result<Result<wit::types::HttpResponse, wit::types::PluginError>> {
         // Buffered host-http is control-plane only. Authority is scoped per
-        // invocation by the manager, so request-path routing facts and
-        // adapter-world calls are denied even when approved network hosts exist.
+        // invocation by the manager: request-path routing facts and
+        // provider-adapter calls are denied even when network hosts are granted.
         if !self.buffered_http_allowed {
             return Ok(Err(err(
                 "permission_denied",
@@ -411,8 +508,9 @@ impl bindings::kinetix::plugin::host_http::Host for HostCtx {
                 "outbound request budget exhausted",
             )));
         }
+
         let parsed = match url::Url::parse(&req.url) {
-            Ok(u) => u,
+            Ok(url) => url,
             Err(_) => return Ok(Err(err("invalid_configuration", "invalid URL"))),
         };
         if parsed.scheme() != "https" {
@@ -421,14 +519,20 @@ impl bindings::kinetix::plugin::host_http::Host for HostCtx {
                 "only https outbound requests are permitted",
             )));
         }
-        let Some(host) = parsed.host_str().map(|h| h.to_ascii_lowercase()) else {
+        if !parsed.username().is_empty() || parsed.password().is_some() {
+            return Ok(Err(err(
+                "permission_denied",
+                "outbound URLs may not contain userinfo",
+            )));
+        }
+        let Some(host) = parsed.host_str().map(|value| value.to_ascii_lowercase()) else {
             return Ok(Err(err("invalid_configuration", "URL has no host")));
         };
-        // §9: manifest hostname check with conservative wildcard matching.
+
         let allowed = self
             .network_hosts
             .iter()
-            .any(|p| super::manifest::host_matches(p, &host));
+            .any(|pattern| super::manifest::host_matches(pattern, &host));
         if !allowed {
             return Ok(Err(err(
                 "permission_denied",
@@ -438,38 +542,65 @@ impl bindings::kinetix::plugin::host_http::Host for HostCtx {
         if req.body.len() as u64 > self.max_http_body {
             return Ok(Err(err("permission_denied", "request body too large")));
         }
+        if req
+            .headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("host"))
+        {
+            return Ok(Err(err(
+                "permission_denied",
+                "plugins may not override the Host header",
+            )));
+        }
 
-        // Credential injection is a host responsibility (§8.1). The plugin only
-        // references a credential; it never sees the bytes.
+        // DNS itself is part of the bounded outbound attempt. Consume the
+        // request budget before resolution so repeated failures cannot create
+        // an unbounded resolver workload.
+        self.outbound_count += 1;
+        let port = parsed.port_or_known_default().unwrap_or(443);
+        let addrs = match resolve_plugin_destination(
+            &host,
+            port,
+            self.allow_private_network,
+        )
+        .await
+        {
+            Ok(addrs) => addrs,
+            Err(error) => return Ok(Err(error.into_plugin_error())),
+        };
+        let client = match pinned_plugin_client(&host, &addrs, self.http_timeout) {
+            Ok(client) => client,
+            Err(error) => return Ok(Err(error.into_plugin_error())),
+        };
+
         let mut builder = match req.method.to_ascii_uppercase().as_str() {
-            "GET" => self.http.get(parsed.clone()),
-            "POST" => self.http.post(parsed.clone()),
-            "PUT" => self.http.put(parsed.clone()),
-            "DELETE" => self.http.delete(parsed.clone()),
-            "PATCH" => self.http.patch(parsed.clone()),
+            "GET" => client.get(parsed.clone()),
+            "POST" => client.post(parsed.clone()),
+            "PUT" => client.put(parsed.clone()),
+            "DELETE" => client.delete(parsed.clone()),
+            "PATCH" => client.patch(parsed.clone()),
             _ => return Ok(Err(err("invalid_configuration", "unsupported method"))),
         };
-        for (k, v) in &req.headers {
-            builder = builder.header(k, v);
+        for (name, value) in &req.headers {
+            builder = builder.header(name, value);
         }
-        if let Some(cred) = &req.credential {
-            match self.inject_credential(cred).await {
+        if let Some(credential) = &req.credential {
+            match self.inject_credential(credential).await {
                 Ok(Some((name, value))) => builder = builder.header(name, value),
                 Ok(None) => {}
-                Err(e) => return Ok(Err(err("permission_denied", e))),
+                Err(error) => return Ok(Err(err("permission_denied", error))),
             }
         }
         if !req.body.is_empty() {
             builder = builder.body(req.body.clone());
         }
 
-        self.outbound_count += 1;
         let resp = match builder.send().await {
-            Ok(r) => r,
-            Err(e) => {
+            Ok(response) => response,
+            Err(error) => {
                 return Ok(Err(wit::types::PluginError {
                     code: "upstream_unavailable".into(),
-                    message: format!("outbound request failed: {}", classify_reqwest(&e)),
+                    message: format!("outbound request failed: {}", classify_reqwest(&error)),
                     retryable: true,
                     retry_after: None,
                     reset_at: None,
@@ -480,10 +611,13 @@ impl bindings::kinetix::plugin::host_http::Host for HostCtx {
         let headers: Vec<(String, String)> = resp
             .headers()
             .iter()
-            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+            .map(|(name, value)| {
+                (
+                    name.to_string(),
+                    value.to_str().unwrap_or("").to_string(),
+                )
+            })
             .collect();
-        // Bound the buffered response; a truncated body is reported honestly
-        // rather than silently accepted as complete (§9, §14).
         let (body, body_truncated) = read_bounded(resp, self.max_http_body).await;
         Ok(Ok(wit::types::HttpResponse {
             status,
