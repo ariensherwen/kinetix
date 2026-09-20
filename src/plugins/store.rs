@@ -654,6 +654,12 @@ mod tests {
         assert!(!circuit_ready(&pool, "p").await.unwrap());
         assert!(!claim_circuit_probe(&pool, "p").await.unwrap());
 
+        reopen_plugin_circuit(&pool, "p", 60).await.unwrap();
+        let reopened = runtime_state(&pool, "p").await.unwrap().unwrap();
+        assert_eq!(reopened.circuit(), CircuitState::Open);
+        assert!(reopened.circuit_open_until.is_some());
+        assert!(!circuit_ready(&pool, "p").await.unwrap());
+
         clear_plugin_failures(&pool, "p").await.unwrap();
         assert!(circuit_ready(&pool, "p").await.unwrap());
         assert!(claim_circuit_probe(&pool, "p").await.unwrap());
