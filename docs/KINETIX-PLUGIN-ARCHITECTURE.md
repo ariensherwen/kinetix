@@ -635,6 +635,30 @@ entry only authorizes connection targets; it must never broaden credential host 
 credential scoped to `api.foo.example` is not sent to `evil.service.example` merely because a
 wildcard matched the connection.
 
+### 9.1 Host-mediated HTTP destination security
+
+A `network_hosts` grant authorizes a hostname pattern, not arbitrary IP
+destinations. Before every buffered `host-http` request, Kinetix:
+
+1. requires HTTPS and rejects URL userinfo;
+2. checks the hostname against the approved manifest grant;
+3. rejects a guest-supplied `Host` header;
+4. resolves the URL host immediately before connecting;
+5. rejects the whole DNS answer set if any address is private, link-local,
+   loopback, ULA, multicast, CGNAT, benchmarking, unspecified, or otherwise
+   blocked by Kinetix policy;
+6. constructs a zero-redirect, no-system-proxy reqwest client whose DNS override
+   is pinned to exactly the validated addresses;
+7. applies a request timeout no longer than the effective plugin wall-time.
+
+`KINETIX_ALLOW_PRIVATE_UPSTREAMS=true` is the explicit development override for
+the private-address check. DNS pinning, HTTPS, hostname grants, no-proxy, and
+zero-redirect behavior remain in force.
+
+This closes the DNS rebinding gap for plugin host HTTP: the hostname cannot be
+validated against one DNS answer and then silently re-resolved to a different
+destination during connection establishment.
+
 ## 10. Plugin storage
 
 A plugin gets a private logical namespace:
