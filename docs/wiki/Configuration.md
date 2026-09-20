@@ -8,7 +8,7 @@ remove:
 | Purpose | Default | Env override |
 | --- | --- | --- |
 | Config (`config.toml`, `master.key`, `admin_password.hash`) | `~/.config/kinetix` | `KINETIX_CONFIG_DIR` |
-| Data (`kinetix.db`, `exports/`, `backups/`) | `~/.local/share/kinetix` | `KINETIX_DATA_DIR` |
+| Data (`kinetix.db`, `exports/`, `backups/`, `plugins/packages/`) | `~/.local/share/kinetix` | `KINETIX_DATA_DIR` |
 | State (logs) | `~/.local/state/kinetix` | `KINETIX_STATE_DIR` |
 
 `--home <DIR>` (or `KINETIX_HOME`) roots all three under `<DIR>/config`,
