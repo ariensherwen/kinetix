@@ -135,6 +135,8 @@ impl std::fmt::Display for PluginFault {
 pub struct HostCtx {
     /// The plugin id this store belongs to (namespaces storage and logs).
     pub plugin_id: String,
+    /// Capability label for observability (for example `credential_strategy`).
+    pub capability: String,
     /// Granted network hosts (already validated, §9).
     pub network_hosts: Vec<String>,
     /// Operator-owned development override for private/internal destinations.
@@ -188,6 +190,8 @@ pub trait HostBacking: Send + Sync {
         quota: u64,
     ) -> Result<()>;
     async fn kv_delete(&self, plugin_id: &str, key: &str) -> Result<()>;
+    /// Attribute an actual host-mediated outbound HTTP attempt.
+    fn record_http_request(&self, plugin_id: &str, capability: &str);
     /// Check whether one of the approved credential scopes authorizes this
     /// plugin to use credentials belonging to the target provider.
     async fn credential_scope_allows(
@@ -557,6 +561,8 @@ impl bindings::kinetix::plugin::host_http::Host for HostCtx {
         }
 
         self.outbound_count += 1;
+        self.backing
+            .record_http_request(&self.plugin_id, &self.capability);
         let resp = match builder.send().await {
             Ok(r) => r,
             Err(e) => {
@@ -1029,6 +1035,7 @@ mod tests {
         async fn kv_delete(&self, _: &str, _: &str) -> anyhow::Result<()> {
             Ok(())
         }
+        fn record_http_request(&self, _: &str, _: &str) {}
         async fn credential_scope_allows(
             &self,
             _: &str,
