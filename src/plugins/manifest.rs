@@ -154,6 +154,139 @@ pub fn validate(manifest: Manifest, policy: HostPolicy) -> Result<ValidatedManif
                 );
             }
         }
+        if let Some(provider) = &integration.provider {
+            let parsed = url::Url::parse(&provider.base_url).map_err(|e| {
+                anyhow!(
+                    "integration '{}' provider base_url is invalid: {e}",
+                    integration.id
+                )
+            })?;
+            if parsed.scheme() != "https" {
+                bail!(
+                    "integration '{}' provider base_url must use https",
+                    integration.id
+                );
+            }
+            if !parsed.username().is_empty() || parsed.password().is_some() {
+                bail!(
+                    "integration '{}' provider base_url may not contain userinfo",
+                    integration.id
+                );
+            }
+            if parsed.host_str().is_none() {
+                bail!(
+                    "integration '{}' provider base_url has no host",
+                    integration.id
+                );
+            }
+
+            if !matches!(
+                provider.wire_format.as_str(),
+                "openai" | "anthropic" | "gemini" | "plugin"
+            ) {
+                bail!(
+                    "integration '{}' provider has unknown wire_format '{}'",
+                    integration.id,
+                    provider.wire_format
+                );
+            }
+            if integration.provider_adapter.is_some() && provider.wire_format != "plugin" {
+                bail!(
+                    "integration '{}' provider_adapter requires wire_format 'plugin'",
+                    integration.id
+                );
+            }
+            if provider.wire_format == "plugin" && integration.provider_adapter.is_none() {
+                bail!(
+                    "integration '{}' provider wire_format 'plugin' requires provider_adapter",
+                    integration.id
+                );
+            }
+
+            match provider.auth_scheme.as_str() {
+                "bearer" => {}
+                "custom_header" => {
+                    if provider
+                        .custom_header_name
+                        .as_deref()
+                        .unwrap_or("")
+                        .trim()
+                        .is_empty()
+                    {
+                        bail!(
+                            "integration '{}' custom_header auth requires custom_header_name",
+                            integration.id
+                        );
+                    }
+                }
+                "query_param" => {
+                    if provider
+                        .custom_param_name
+                        .as_deref()
+                        .unwrap_or("")
+                        .trim()
+                        .is_empty()
+                    {
+                        bail!(
+                            "integration '{}' query_param auth requires custom_param_name",
+                            integration.id
+                        );
+                    }
+                }
+                other => bail!(
+                    "integration '{}' provider has unknown auth_scheme '{}'",
+                    integration.id,
+                    other
+                ),
+            }
+
+            if provider.timeout_ms == 0 || provider.timeout_ms > 600_000 {
+                bail!(
+                    "integration '{}' provider timeout_ms must be 1..=600000",
+                    integration.id
+                );
+            }
+            if !matches!(provider.capability_mode.as_str(), "permissive" | "strict") {
+                bail!(
+                    "integration '{}' provider has invalid capability_mode '{}'",
+                    integration.id,
+                    provider.capability_mode
+                );
+            }
+            if let Some(path) = &provider.models_path {
+                if !path.starts_with('/') || path.contains("://") {
+                    bail!(
+                        "integration '{}' provider models_path must be an absolute URL path",
+                        integration.id
+                    );
+                }
+            }
+            for host in &provider.credential_hosts {
+                if host.trim().is_empty()
+                    || host.contains('/')
+                    || host.contains(':')
+                    || host.contains('*')
+                    || host.contains(' ')
+                {
+                    bail!(
+                        "integration '{}' provider credential host '{}' is invalid",
+                        integration.id,
+                        host
+                    );
+                }
+            }
+            for (name, value) in &provider.extra_headers {
+                if name.trim().is_empty()
+                    || name.contains(['\r', '\n', ':'])
+                    || value.contains(['\r', '\n'])
+                {
+                    bail!(
+                        "integration '{}' provider contains an invalid extra header",
+                        integration.id
+                    );
+                }
+            }
+        }
     }
 
     let mut ui_setting_keys = std::collections::HashSet::new();
@@ -545,6 +678,33 @@ storage = "2MiB"
         );
         let err = parse_and_validate(&bad, HostPolicy::default()).unwrap_err();
         assert!(err.to_string().contains("requires options"), "{err}");
+    }
+
+    #[test]
+    fn rejects_adapter_provider_template_without_plugin_wire_sentinel() {
+        let bad = GOOD.replace(
+            "model_source = \"foo-models\"",
+            "provider_adapter = \"foo-adapter\"\nmodel_source = \"foo-models\"\n\n[integrations.provider]\nbase_url = \"https://api.foo.example\"\nwire_format = \"openai\"",
+        ).replace(
+            "model_sources = [\"foo-models\"]",
+            "model_sources = [\"foo-models\"]\nprovider_adapters = [\"foo-adapter\"]",
+        );
+        let err = parse_and_validate(&bad, HostPolicy::default()).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("provider_adapter requires wire_format 'plugin'"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn rejects_insecure_integration_provider_url() {
+        let bad = GOOD.replace(
+            "model_source = \"foo-models\"",
+            "model_source = \"foo-models\"\n\n[integrations.provider]\nbase_url = \"http://api.foo.example\"\nwire_format = \"gemini\"",
+        );
+        let err = parse_and_validate(&bad, HostPolicy::default()).unwrap_err();
+        assert!(err.to_string().contains("base_url must use https"), "{err}");
     }
 
     #[test]
