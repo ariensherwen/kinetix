@@ -49,6 +49,31 @@ impl HostBacking for Backing {
     async fn kv_delete(&self, plugin_id: &str, key: &str) -> Result<()> {
         store::kv_delete(&self.pool, plugin_id, key).await
     }
+    async fn credential_scope_allows(
+        &self,
+        plugin_id: &str,
+        provider_id: &str,
+        scopes: &[String],
+    ) -> Result<bool> {
+        let exact = format!("provider:{provider_id}");
+        if scopes.iter().any(|scope| scope == "*" || scope == &exact) {
+            return Ok(true);
+        }
+
+        let Some(provider) = crate::db::get_provider(&self.pool, provider_id).await? else {
+            return Ok(false);
+        };
+        for scope in scopes {
+            let Some(strategy) = scope.strip_prefix("credential_strategy:") else {
+                continue;
+            };
+            let expected = format!("plugin:{plugin_id}/{strategy}");
+            if provider.credential_plugin == expected {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
     fn log(&self, plugin_id: &str, level: &str, message: &str) {
         // §18: plugin logs are namespaced and redacted like core logs.
         match level {
