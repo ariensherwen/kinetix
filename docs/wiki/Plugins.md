@@ -116,6 +116,7 @@ version = "0.1.0"
 
 [provides]
 credential_strategies = ["antigravity-oauth"]
+auth_flows = ["antigravity"]
 provider_adapters = ["antigravity"]
 
 [[integrations]]
@@ -124,9 +125,10 @@ name = "Google Antigravity"
 description = "Connect a Google Antigravity account and use the v1internal model API."
 provider_adapter = "antigravity"
 credential_strategy = "antigravity-oauth"
+auth_flow = "antigravity"
 
 [permissions]
-network_hosts = ["oauth2.googleapis.com"]
+network_hosts = ["oauth2.googleapis.com", "www.googleapis.com"]
 credential_scopes = ["provider:antigravity"]
 credential_read = true
 
@@ -144,9 +146,35 @@ An optional `[[integrations]]` entry groups low-level capabilities into a
 user-facing integration. The descriptor is declarative metadata: it does not
 execute code in the dashboard and grants no additional permission.
 
-Each referenced `provider_adapter`, `credential_strategy`, or `model_source`
-must exist in the same manifest's `[provides]` list. Kinetix rejects duplicate
+Each referenced `provider_adapter`, `credential_strategy`, `auth_flow`, or
+`model_source` must exist in the same manifest's `[provides]` list. Kinetix rejects duplicate
 integration IDs or references to undeclared capabilities during installation.
+
+### Account authorization flows
+
+A plugin may declare named `auth_flows`. These use the separate
+`plugin-auth` WIT world, so older plugin API v1 components that do not provide
+browser login remain compatible.
+
+Kinetix owns the security-sensitive browser session mechanics:
+
+- 256-bit random CSRF `state`,
+- S256 PKCE verifier/challenge generation and in-memory storage,
+- ten-minute flow expiry,
+- one-time state consumption before code exchange,
+- credential JSON validation, encryption, and account insertion.
+
+The plugin owns provider-specific behavior:
+
+- constructing the provider authorization URL,
+- exchanging the callback code,
+- optional provider user-info/onboarding calls through approved `host-http`,
+- mapping the result to the provider credential JSON consumed by its
+  credential strategy.
+
+The callback never writes an account into an arbitrary provider. The selected
+provider must already be bound to the integration's declared
+`credential_strategy`.
 
 ---
 
