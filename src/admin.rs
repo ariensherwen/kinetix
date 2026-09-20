@@ -3924,6 +3924,156 @@ pub async fn install_plugin(
     })))
 }
 
+/// `POST /admin/api/plugins/{id}/integrations/{integration}/provider` —
+/// create (or return) the host-owned provider described by an Integration.
+pub async fn setup_plugin_integration_provider(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+    Path((id, integration_id)): Path<(String, String)>,
+) -> ApiResult {
+    let manager = plugin_manager(&state)?;
+    let row = manager
+        .get(&id)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::not_found("plugin not found"))?;
+    if row.enabled == 0 {
+        return Err(ApiError::bad(
+            "plugin must be enabled before its integration can create a provider",
+        ));
+    }
+    let manifest = row
+        .manifest()
+        .ok_or_else(|| ApiError::bad("plugin manifest is unreadable"))?;
+    let integration = manifest
+        .integrations
+        .iter()
+        .find(|integration| integration.id == integration_id)
+        .ok_or_else(|| ApiError::not_found("plugin integration not found"))?;
+    let template = integration
+        .provider
+        .as_ref()
+        .ok_or_else(|| ApiError::bad("integration does not declare provider defaults"))?;
+
+    validate_outbound_url(&state, &template.base_url)?;
+
+    let wire_plugin = integration
+        .provider_adapter
+        .as_deref()
+        .map(|name| format!("plugin:{id}/{name}"))
+        .unwrap_or_default();
+    let credential_plugin = integration
+        .credential_strategy
+        .as_deref()
+        .map(|name| format!("plugin:{id}/{name}"))
+        .unwrap_or_default();
+    let model_source_plugin = integration
+        .model_source
+        .as_deref()
+        .map(|name| format!("plugin:{id}/{name}"))
+        .unwrap_or_default();
+
+    for (reference, capability) in [
+        (&wire_plugin, crate::plugins::Capability::ProviderAdapter),
+        (
+            &credential_plugin,
+            crate::plugins::Capability::CredentialStrategy,
+        ),
+        (&model_source_plugin, crate::plugins::Capability::ModelSource),
+    ] {
+        if !reference.is_empty()
+            && manager
+                .resolve_binding(reference, capability)
+                .await
+                .is_none()
+        {
+            return Err(ApiError::bad(format!(
+                "integration capability binding '{reference}' is not enabled and approved"
+            )));
+        }
+    }
+
+    let wire = WireFormat::parse(&template.wire_format)
+        .ok_or_else(|| ApiError::bad("integration provider has invalid wire_format"))?;
+    if wire == WireFormat::Plugin && wire_plugin.is_empty() {
+        return Err(ApiError::bad(
+            "integration provider uses plugin wire format without a provider adapter",
+        ));
+    }
+    let auth = AuthScheme::parse(&template.auth_scheme)
+        .ok_or_else(|| ApiError::bad("integration provider has invalid auth_scheme"))?;
+
+    let existing = db::list_providers(&state.pool)
+        .await
+        .map_err(ApiError::internal)?
+        .into_iter()
+        .find(|provider| {
+            provider.base_url == template.base_url
+                && provider.wire_plugin == wire_plugin
+                && provider.credential_plugin == credential_plugin
+                && provider.model_source_plugin == model_source_plugin
+        });
+    if let Some(provider) = existing {
+        return Ok(Json(json!({
+            "id": provider.id,
+            "name": provider.name,
+            "created": false,
+        })));
+    }
+
+    let credential_hosts = template.credential_hosts.join(",");
+    let id_created = db::insert_provider(
+        &state.pool,
+        &db::NewProvider {
+            name: &integration.name,
+            base_url: &template.base_url,
+            wire_format: wire,
+            auth_scheme: auth,
+            custom_header_name: template.custom_header_name.as_deref(),
+            custom_param_name: template.custom_param_name.as_deref(),
+            extra_headers: serde_json::to_value(&template.extra_headers)
+                .map_err(ApiError::internal)?,
+            timeout_ms: template.timeout_ms as i64,
+            capability_mode: &template.capability_mode,
+            models_path: template.models_path.as_deref(),
+            rate_limit_rules: json!({}),
+            follow_redirects: template.follow_redirects,
+            credential_hosts: &credential_hosts,
+            allow_insecure_tls: false,
+            wire_plugin: &wire_plugin,
+            credential_plugin: &credential_plugin,
+            model_source_plugin: &model_source_plugin,
+        },
+    )
+    .await
+    .map_err(ApiError::internal)?;
+
+    let _ = db::insert_audit(
+        &state.pool,
+        "admin",
+        "plugin_integration_provider_created",
+        "provider",
+        &id_created,
+        &integration.name,
+        &format!(
+            "Created provider from plugin {} integration {}.",
+            id, integration.id
+        ),
+    )
+    .await;
+    state
+        .registry
+        .reload(&state.pool)
+        .await
+        .map_err(ApiError::internal)?;
+
+    Ok(Json(json!({
+        "id": id_created,
+        "name": integration.name,
+        "created": true,
+    })))
+}
+
 #[derive(Deserialize)]
 pub struct PluginAuthStartBody {
     pub plugin_id: String,
