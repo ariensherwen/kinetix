@@ -837,7 +837,27 @@ capacity.
 This keeps the configured quota stable regardless of encryption/base64
 overhead and closes cache/config bypasses.
 
-### 14.0.2 Invocation concurrency isolation
+### 14.0.2 Compiled component cache
+
+Wasmtime compilation is package-code work, not invocation authority. Kinetix
+therefore caches one immutable compiled `Component` per installed plugin,
+tagged by the active package SHA-256.
+
+The cache deliberately stops at the compiled component boundary:
+
+- every invocation still creates a fresh `Store` and guest instance;
+- approved permissions, HTTP budgets, storage quotas, epoch deadlines, and
+  cancellation state are reconstructed from current host state;
+- install/upgrade and rollback compile before publication and replace the cache
+  entry with the new package SHA;
+- a process restart warms the cache lazily on first use;
+- plugin removal drops its cache entry.
+
+This removes repeated Wasmtime compilation from request/control-plane
+invocations without retaining stale runtime authority. Global plugin metrics
+expose `component_cache_hits` and `component_cache_misses`.
+
+### 14.0.3 Invocation concurrency isolation
 
 Guest execution uses two host-owned semaphore layers:
 
