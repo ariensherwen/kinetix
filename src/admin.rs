@@ -3690,7 +3690,7 @@ pub async fn start_plugin_auth(
         Ok(url) => url,
         Err(error) => {
             state.plugin_auth_sessions.revoke(&pending.state);
-            return Err(plugin_bad(error));
+            return Err(ApiError::bad(error.to_string()));
         }
     };
 
