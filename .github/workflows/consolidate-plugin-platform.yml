@@ -1,0 +1,61 @@
+name: consolidate plugin platform
+
+on:
+  push:
+    branches:
+      - perf/plugin-component-cache-canonical-v021
+
+permissions:
+  contents: write
+
+jobs:
+  consolidate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/plugin-platform-v021
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge current product stack
+        run: |
+          git fetch origin fix/plugin-http-dns-pinning-v021
+          git merge --no-commit --no-ff -X theirs origin/fix/plugin-http-dns-pinning-v021
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Format
+        run: cargo fmt --all
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Build dashboard
+        working-directory: dashboard
+        run: |
+          npm ci
+          npx tsc --noEmit
+          npm run build
+
+      - name: Check Rust
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --all-targets
+          cargo test --quiet
+
+      - name: Commit consolidated branch
+        run: |
+          git add -A
+          git commit -m "feat(plugins): consolidate plugin platform roadmap"
+          git push origin HEAD:feat/plugin-platform-v021
