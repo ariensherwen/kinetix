@@ -1754,36 +1754,30 @@ mod tests {
         .unwrap();
 
         let backing = Backing { pool, crypto };
-        assert!(
-            backing
-                .credential_scope_allows(
-                    "dev.example.plugin",
-                    &provider_id,
-                    &["credential_strategy:oauth".into()],
-                )
-                .await
-                .unwrap()
-        );
-        assert!(
-            !backing
-                .credential_scope_allows(
-                    "dev.example.plugin",
-                    &provider_id,
-                    &["credential_strategy:other".into()],
-                )
-                .await
-                .unwrap()
-        );
-        assert!(
-            !backing
-                .credential_scope_allows(
-                    "dev.other.plugin",
-                    &provider_id,
-                    &["credential_strategy:oauth".into()],
-                )
-                .await
-                .unwrap()
-        );
+        assert!(backing
+            .credential_scope_allows(
+                "dev.example.plugin",
+                &provider_id,
+                &["credential_strategy:oauth".into()],
+            )
+            .await
+            .unwrap());
+        assert!(!backing
+            .credential_scope_allows(
+                "dev.example.plugin",
+                &provider_id,
+                &["credential_strategy:other".into()],
+            )
+            .await
+            .unwrap());
+        assert!(!backing
+            .credential_scope_allows(
+                "dev.other.plugin",
+                &provider_id,
+                &["credential_strategy:oauth".into()],
+            )
+            .await
+            .unwrap());
 
         let _ = std::fs::remove_dir_all(dir);
     }
