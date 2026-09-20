@@ -2890,7 +2890,21 @@ pub fn is_blocked_ip(ip: std::net::IpAddr) -> bool {
                 || v4.is_broadcast()
                 || v4.octets()[0] == 169 && v4.octets()[1] == 254
         }
-        std::net::IpAddr::V6(v6) => v6.is_loopback() || v6.is_unspecified(),
+        std::net::IpAddr::V6(v6) => {
+            if v6.is_loopback() || v6.is_unspecified() || v6.is_multicast() {
+                return true;
+            }
+            let octets = v6.octets();
+            let unique_local = octets[0] & 0xfe == 0xfc;
+            let link_local = octets[0] == 0xfe && octets[1] & 0xc0 == 0x80;
+            if unique_local || link_local {
+                return true;
+            }
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_blocked_ip(std::net::IpAddr::V4(v4));
+            }
+            false
+        }
     }
 }
 
