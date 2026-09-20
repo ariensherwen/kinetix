@@ -3582,6 +3582,16 @@ pub(crate) async fn register_enabled_plugin_capabilities(state: &AppState, id: &
     }
 }
 
+/// `GET /admin/api/plugins/catalog` — embedded official discovery metadata.
+///
+/// Catalog metadata is not a package trust root. Installation continues to use
+/// the normal SHA/signature/permission-review pipeline.
+pub async fn plugin_catalog(_auth: AdminAuth) -> ApiResult {
+    let catalog: Value = serde_json::from_str(include_str!("../plugins/catalog.json"))
+        .map_err(ApiError::internal)?;
+    Ok(Json(catalog))
+}
+
 /// `GET /admin/api/plugins` — list installed plugins.
 pub async fn list_plugins(State(state): State<AppState>, _auth: AdminAuth) -> ApiResult {
     let manager = plugin_manager(&state)?;
