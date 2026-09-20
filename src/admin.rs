@@ -700,7 +700,11 @@ async fn provider_plugin_binding_problems(state: &AppState, body: &ProviderBody)
     use crate::plugins::Capability;
 
     let bindings = [
-        ("wire_plugin", body.wire_plugin.as_str(), Capability::ProviderAdapter),
+        (
+            "wire_plugin",
+            body.wire_plugin.as_str(),
+            Capability::ProviderAdapter,
+        ),
         (
             "credential_plugin",
             body.credential_plugin.as_str(),
@@ -731,7 +735,11 @@ async fn provider_plugin_binding_problems(state: &AppState, body: &ProviderBody)
             ));
             continue;
         };
-        if manager.resolve_binding(reference, capability).await.is_none() {
+        if manager
+            .resolve_binding(reference, capability)
+            .await
+            .is_none()
+        {
             problems.push(format!(
                 "{field} reference '{reference}' does not resolve to an installed, enabled, approved plugin providing {}",
                 capability.manifest_key()
@@ -3881,9 +3889,7 @@ pub async fn plugin_auth_callback(
             "Provider credential binding changed during browser authorization; enrollment refused.",
         )
         .await;
-        return Ok(Redirect::to(
-            "/admin/plugins?plugin_auth=binding_changed",
-        ));
+        return Ok(Redirect::to("/admin/plugins?plugin_auth=binding_changed"));
     }
 
     let encrypted = state
