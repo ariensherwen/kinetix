@@ -3621,6 +3621,50 @@ pub async fn get_plugin(
     Ok(Json(summary))
 }
 
+/// `GET /admin/api/plugins/{id}/settings` — read host-owned plugin settings.
+pub async fn plugin_settings(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+    Path(id): Path<String>,
+) -> ApiResult {
+    let manager = plugin_manager(&state)?;
+    let settings = manager.ui_settings(&id).await.map_err(plugin_bad)?;
+    Ok(Json(settings))
+}
+
+#[derive(Deserialize)]
+pub struct PluginSettingsBody {
+    #[serde(default)]
+    pub values: serde_json::Map<String, Value>,
+}
+
+/// `PUT /admin/api/plugins/{id}/settings` — partially update validated settings.
+pub async fn update_plugin_settings(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+    Path(id): Path<String>,
+    Json(body): Json<PluginSettingsBody>,
+) -> ApiResult {
+    let manager = plugin_manager(&state)?;
+    let settings = manager
+        .update_ui_settings(&id, &body.values)
+        .await
+        .map_err(plugin_bad)?;
+
+    let _ = db::insert_audit(
+        &state.pool,
+        "admin",
+        "plugin_settings_updated",
+        "plugin",
+        &id,
+        &id,
+        &format!("Updated {} plugin setting(s). Values are not written to audit logs.", body.values.len()),
+    )
+    .await;
+
+    Ok(Json(settings))
+}
+
 /// `POST /admin/api/plugins/install` — install (or upgrade) a package.
 pub async fn install_plugin(
     State(state): State<AppState>,
