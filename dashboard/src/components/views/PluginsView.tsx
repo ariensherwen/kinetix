@@ -4,6 +4,7 @@ import {
   Box,
   CheckCircle2,
   KeyRound,
+  LogIn,
   Network,
   PackagePlus,
   Power,
@@ -14,6 +15,7 @@ import {
   Upload,
 } from 'lucide-react';
 import { Kinetix, PluginDetail, PluginPermissionResponse, PluginSummary } from '../../lib/resources';
+import { Provider } from '../../types';
 import { SketchBadge, SketchButton, WobblyCard } from '../HandDrawnElements';
 
 function fileAsBase64(file: File): Promise<string> {
@@ -65,6 +67,7 @@ function prettyCapability(capability: string): string {
 
 export const PluginsView: React.FC = () => {
   const [plugins, setPlugins] = useState<PluginSummary[]>([]);
+  const [providers, setProviders] = useState<Provider[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<PluginDetail | null>(null);
   const [permissions, setPermissions] = useState<PluginPermissionResponse | null>(null);
@@ -90,8 +93,12 @@ export const PluginsView: React.FC = () => {
   const refresh = useCallback(async (preferredId?: string | null) => {
     setLoading(true);
     try {
-      const rows = await Kinetix.plugins();
+      const [rows, providerRows] = await Promise.all([
+        Kinetix.plugins(),
+        Kinetix.providers(),
+      ]);
       setPlugins(rows);
+      setProviders(providerRows);
       const target = preferredId ?? selectedId;
       if (target && rows.some((plugin) => plugin.id === target)) {
         setSelectedId(target);
@@ -113,6 +120,31 @@ export const PluginsView: React.FC = () => {
   }, [loadDetail, selectedId]);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const authResult = params.get('plugin_auth');
+    if (authResult) {
+      const messages: Record<string, string> = {
+        success: 'Account connected successfully through the plugin authorization flow.',
+        cancelled: 'Account authorization was cancelled.',
+        error: 'Account authorization failed during the provider exchange.',
+        binding_changed:
+          'Account authorization was refused because the provider plugin binding changed during login.',
+      };
+      const message = messages[authResult] ?? 'Account authorization returned an unknown result.';
+      if (authResult === 'success') {
+        setNotice(message);
+      } else {
+        setError(message);
+      }
+      params.delete('plugin_auth');
+      const query = params.toString();
+      window.history.replaceState(
+        null,
+        '',
+        `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`,
+      );
+    }
+
     void refresh(null);
     // Initial load only; later refreshes are explicit so selecting an item does
     // not re-run this effect through the selectedId dependency.
@@ -198,6 +230,23 @@ export const PluginsView: React.FC = () => {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
+      setBusy(null);
+    }
+  };
+
+  const connectAccount = async (
+    pluginId: string,
+    flowName: string,
+    providerId: string,
+  ) => {
+    setBusy(`auth:${flowName}:${providerId}`);
+    setError(null);
+    setNotice(null);
+    try {
+      const started = await Kinetix.startPluginAuth(pluginId, flowName, providerId);
+      window.location.assign(started.authorize_url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
       setBusy(null);
     }
   };
@@ -470,7 +519,12 @@ export const PluginsView: React.FC = () => {
                           )}
                           {integration.credential_strategy && (
                             <code className="text-xs bg-[var(--erased)] px-2 py-1">
-                              auth:{integration.credential_strategy}
+                              credential:{integration.credential_strategy}
+                            </code>
+                          )}
+                          {integration.auth_flow && (
+                            <code className="text-xs bg-[var(--erased)] px-2 py-1">
+                              login:{integration.auth_flow}
                             </code>
                           )}
                           {integration.model_source && (
@@ -479,6 +533,48 @@ export const PluginsView: React.FC = () => {
                             </code>
                           )}
                         </div>
+
+                        {integration.auth_flow && integration.credential_strategy && (
+                          <div className="mt-4 space-y-2">
+                            {providers
+                              .filter(
+                                (provider) =>
+                                  provider.credentialPlugin ===
+                                  `plugin:${selected.id}/${integration.credential_strategy}`,
+                              )
+                              .map((provider) => (
+                                <SketchButton
+                                  key={provider.id}
+                                  variant="primary"
+                                  className="gap-2"
+                                  disabled={busy !== null || selected.status !== 'enabled'}
+                                  onClick={() =>
+                                    void connectAccount(
+                                      selected.id,
+                                      integration.auth_flow!,
+                                      provider.id,
+                                    )
+                                  }
+                                >
+                                  <LogIn className="w-4 h-4" />
+                                  Connect {provider.name}
+                                </SketchButton>
+                              ))}
+                            {!providers.some(
+                              (provider) =>
+                                provider.credentialPlugin ===
+                                `plugin:${selected.id}/${integration.credential_strategy}`,
+                            ) && (
+                              <p className="text-xs font-body text-[var(--ink)]/60">
+                                Bind a provider&apos;s credential plugin to{' '}
+                                <code>
+                                  plugin:{selected.id}/{integration.credential_strategy}
+                                </code>{' '}
+                                before connecting an account.
+                              </p>
+                            )}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
