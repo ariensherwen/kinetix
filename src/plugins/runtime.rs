@@ -176,7 +176,13 @@ pub struct HostCtx {
 pub trait HostBacking: Send + Sync {
     /// Read a plugin KV value (already decrypted by the backing).
     async fn kv_get(&self, plugin_id: &str, key: &str) -> Result<Option<Vec<u8>>>;
-    async fn kv_put(&self, plugin_id: &str, key: &str, value: &[u8]) -> Result<()>;
+    async fn kv_put_limited(
+        &self,
+        plugin_id: &str,
+        key: &str,
+        value: &[u8],
+        quota: u64,
+    ) -> Result<()>;
     async fn kv_delete(&self, plugin_id: &str, key: &str) -> Result<()>;
     /// Check whether one of the approved credential scopes authorizes this
     /// plugin to use credentials belonging to the target provider.
@@ -537,18 +543,11 @@ impl bindings::kinetix::plugin::host_storage::Host for HostCtx {
         if key.starts_with(CONFIG_PREFIX) {
             return Ok(Err("host-owned config namespace is read-only".into()));
         }
-        let used = self
+        match self
             .backing
-            .kv_get(&self.plugin_id, "")
+            .kv_put_limited(&self.plugin_id, &key, &value, self.storage_quota)
             .await
-            .ok()
-            .flatten()
-            .map(|v| v.len() as u64)
-            .unwrap_or(0);
-        if used + value.len() as u64 > self.storage_quota {
-            return Ok(Err("storage quota exceeded".into()));
-        }
-        match self.backing.kv_put(&self.plugin_id, &key, &value).await {
+        {
             Ok(()) => Ok(Ok(())),
             Err(e) => Ok(Err(format!("storage write failed: {e}"))),
         }
@@ -588,7 +587,12 @@ impl bindings::kinetix::plugin::host_storage::Host for HostCtx {
         let key = format!("{CACHE_PREFIX}{name}");
         match self
             .backing
-            .kv_put(&self.plugin_id, &key, envelope.as_bytes())
+            .kv_put_limited(
+                &self.plugin_id,
+                &key,
+                envelope.as_bytes(),
+                self.storage_quota,
+            )
             .await
         {
             Ok(()) => Ok(Ok(())),
@@ -817,7 +821,13 @@ mod tests {
         async fn kv_get(&self, _: &str, _: &str) -> anyhow::Result<Option<Vec<u8>>> {
             Ok(None)
         }
-        async fn kv_put(&self, _: &str, _: &str, _: &[u8]) -> anyhow::Result<()> {
+        async fn kv_put_limited(
+            &self,
+            _: &str,
+            _: &str,
+            _: &[u8],
+            _: u64,
+        ) -> anyhow::Result<()> {
             Ok(())
         }
         async fn kv_delete(&self, _: &str, _: &str) -> anyhow::Result<()> {
