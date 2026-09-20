@@ -1125,6 +1125,7 @@ pub fn manifest_summary(row: &PluginRow) -> serde_json::Value {
     let manifest = row.manifest();
     serde_json::json!({
         "id": row.id,
+        "name": manifest.as_ref().map(|m| m.name.clone()).unwrap_or_else(|| row.id.clone()),
         "version": row.version,
         "plugin_api_major": row.plugin_api_major,
         "sha256": row.package_sha256,
