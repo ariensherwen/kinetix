@@ -830,6 +830,14 @@ mod tests {
         async fn kv_delete(&self, _: &str, _: &str) -> anyhow::Result<()> {
             Ok(())
         }
+        async fn credential_scope_allows(
+            &self,
+            _: &str,
+            _: &str,
+            _: &[String],
+        ) -> anyhow::Result<bool> {
+            Ok(false)
+        }
         fn log(&self, _: &str, _: &str, _: &str) {}
         async fn resolve_secret(&self, _: &str, _: &str, _: &str) -> anyhow::Result<String> {
             Ok(String::new())
