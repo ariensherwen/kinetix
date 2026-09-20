@@ -196,6 +196,14 @@ pub trait HostBacking: Send + Sync {
         provider_id: &str,
         account_id: &str,
     ) -> Result<String>;
+    /// Resolve the highest-priority non-disabled account secret for a provider.
+    /// This backs the narrow `provider-default:<provider-id>` named credential
+    /// used by account-agnostic control-plane capabilities such as model discovery.
+    async fn resolve_default_secret(
+        &self,
+        plugin_id: &str,
+        provider_id: &str,
+    ) -> Result<String>;
 }
 
 /// A configured Wasmtime host runtime shared by every plugin instance.
@@ -486,6 +494,40 @@ async fn read_bounded(mut resp: reqwest::Response, limit: u64) -> (Vec<u8>, bool
 }
 
 impl HostCtx {
+    async fn read_credential_secret(
+        &self,
+        cred: &wit::types::CredentialRef,
+    ) -> Result<String, String> {
+        let provider_id = match cred {
+            wit::types::CredentialRef::Account(account) => account.provider_id.as_str(),
+            wit::types::CredentialRef::Named(name) => name
+                .strip_prefix("provider-default:")
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| "unknown named credential".to_string())?,
+        };
+
+        if !self
+            .scope_allows(provider_id)
+            .await
+            .map_err(|e| format!("credential scope check failed: {e}"))?
+        {
+            return Err(format!("plugin is not scoped to provider '{provider_id}'"));
+        }
+
+        match cred {
+            wit::types::CredentialRef::Account(account) => self
+                .backing
+                .resolve_secret(&self.plugin_id, &account.provider_id, &account.account_id)
+                .await
+                .map_err(|e| format!("credential resolution failed: {e}")),
+            wit::types::CredentialRef::Named(_) => self
+                .backing
+                .resolve_default_secret(&self.plugin_id, provider_id)
+                .await
+                .map_err(|e| format!("credential resolution failed: {e}")),
+        }
+    }
+
     /// Resolve a credential ref into a `(header_name, value)` to inject, or an
     /// error string when the plugin is not authorized.
     async fn inject_credential(
@@ -506,10 +548,8 @@ impl HostCtx {
             return Err(format!("plugin is not scoped to provider '{provider_id}'"));
         }
         let secret = self
-            .backing
-            .resolve_secret(&self.plugin_id, &provider_id, &account_id)
-            .await
-            .map_err(|e| format!("credential resolution failed: {e}"))?;
+            .read_credential_secret(cred)
+            .await?;
         Ok(Some((
             "authorization".to_string(),
             format!("Bearer {secret}"),
@@ -695,14 +735,8 @@ impl bindings::kinetix::plugin::host_credential::Host for HostCtx {
                 "plugin has no credential_read grant",
             )));
         }
-        match self.inject_credential(&credential).await {
-            // `inject_credential` returns a pre-formatted `Bearer` header; strip
-            // the scheme so the guest receives just the secret it asked for.
-            Ok(Some((_, value))) => {
-                let secret = value.strip_prefix("Bearer ").unwrap_or(&value).to_string();
-                Ok(Ok(secret))
-            }
-            Ok(None) => Ok(Err(err("unknown", "credential not resolvable"))),
+        match self.read_credential_secret(&credential).await {
+            Ok(secret) => Ok(Ok(secret)),
             Err(e) => Ok(Err(err("permission_denied", e))),
         }
     }
