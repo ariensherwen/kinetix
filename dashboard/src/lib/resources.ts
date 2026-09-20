@@ -71,6 +71,18 @@ export interface PluginIntegration {
   model_source?: string | null;
 }
 
+export interface PluginUiAction {
+  id: string;
+  label: string;
+  kind: 'auth' | string;
+  integration: string;
+  description: string;
+}
+
+export interface PluginUi {
+  actions: PluginUiAction[];
+}
+
 export interface PluginPermissions {
   network_hosts: string[];
   credential_scopes: string[];
@@ -95,6 +107,7 @@ export interface PluginSummary {
   status: string;
   provides: PluginCapability[];
   integrations: PluginIntegration[];
+  ui: PluginUi;
   permissions: PluginPermissions;
   limits: PluginLimits;
 }
