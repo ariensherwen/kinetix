@@ -48,7 +48,8 @@ the plugin is enabled and fails closed if the plugin is missing or disabled.
 
 ## Permissions
 
-- `network_hosts = ["oauth2.googleapis.com"]` — only the Google token endpoint.
+- `network_hosts = ["accounts.google.com", "oauth2.googleapis.com", "www.googleapis.com"]` —
+  the reviewed browser authorization host, token endpoint, and user-info endpoint.
 - `credential_scopes = ["provider:antigravity"]`.
 - `credential_read = true` — **required** because the refresh-token exchange
   places the secret in a POST body, which the opaque-handle model cannot
