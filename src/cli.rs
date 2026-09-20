@@ -1019,7 +1019,7 @@ async fn cmd_alias(cli: &Cli, args: AliasArgs) -> Result<()> {
 }
 
 async fn cmd_plugin(cli: &Cli, args: PluginArgs) -> Result<()> {
-    let (_, pool, crypto) = open(cli).await?;
+    let (config, pool, crypto) = open(cli).await?;
     let crypto = std::sync::Arc::new(crypto);
     let http = reqwest::Client::builder()
         .user_agent(concat!("kinetix/", env!("CARGO_PKG_VERSION")))
@@ -1030,6 +1030,7 @@ async fn cmd_plugin(cli: &Cli, args: PluginArgs) -> Result<()> {
         crypto,
         http,
         crate::plugins::HostPolicy::default(),
+        config.paths.plugin_packages_dir(),
     )
     .context("building plugin host")?;
 
