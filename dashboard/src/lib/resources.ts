@@ -227,6 +227,18 @@ export interface PluginRollbackPreview {
   provides: PluginCapability[];
 }
 
+export interface PluginCatalogPreview {
+  id: string;
+  installed: boolean;
+  current_version?: string | null;
+  target_version: string;
+  sha256?: string | null;
+  permissions: PluginPermissions;
+  permission_diff: PluginPermissionDiff | null;
+  provides: PluginCapability[];
+  note: string;
+}
+
 export interface PluginDetail extends PluginSummary {
   permissions_approved?: PluginPermissionGrant[];
   runtime?: Record<string, unknown> | null;
@@ -373,6 +385,10 @@ export const Kinetix = {
   },
   pluginCatalog: () =>
     api.get<PluginCatalogResponse>('/admin/api/plugins/catalog'),
+  previewCatalogPlugin: (id: string) =>
+    api.get<PluginCatalogPreview>(
+      `/admin/api/plugins/catalog/${encodeURIComponent(id)}/preview`,
+    ),
   installCatalogPlugin: (id: string) =>
     api.post<PluginInstallResult>(
       `/admin/api/plugins/catalog/${encodeURIComponent(id)}/install`,
