@@ -8,6 +8,7 @@
 //! imports are wired to [`HostCtx`], which enforces the plugin's granted
 //! permissions: network host allow-list, storage namespace, and logging.
 
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -137,6 +138,9 @@ pub struct HostCtx {
     pub plugin_id: String,
     /// Granted network hosts (already validated, §9).
     pub network_hosts: Vec<String>,
+    /// Operator-owned development override for private/internal destinations.
+    /// This is never derived from plugin manifest data.
+    pub allow_private_network: bool,
     /// Whether the plugin may read plaintext credentials (§8.2).
     pub credential_read: bool,
     /// Whether the plugin may use host-side credential signing (§7.3).
@@ -158,8 +162,6 @@ pub struct HostCtx {
     pub buffered_http_allowed: bool,
     /// Outbound request counter for the current invocation.
     pub outbound_count: u32,
-    /// The HTTP client used for host-mediated outbound requests.
-    pub http: reqwest::Client,
     /// Storage + credential side effects are deferred to async host functions;
     /// this holds the backing handles.
     pub backing: Arc<dyn HostBacking>,
@@ -367,6 +369,63 @@ fn err(code: &str, message: impl Into<String>) -> wit::types::PluginError {
 
 impl bindings::kinetix::plugin::types::Host for HostCtx {}
 
+fn blocked_plugin_hostname(host: &str) -> bool {
+    let lower = host.to_ascii_lowercase();
+    lower == "localhost"
+        || lower.ends_with(".localhost")
+        || lower.ends_with(".internal")
+        || lower == "metadata.google.internal"
+}
+
+async fn resolve_plugin_destination(
+    host: &str,
+    port: u16,
+    allow_private_network: bool,
+) -> Result<Vec<SocketAddr>, String> {
+    if !allow_private_network && blocked_plugin_hostname(host) {
+        return Err(format!("host '{host}' is a blocked private/metadata destination"));
+    }
+
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if !allow_private_network && crate::admin::is_blocked_ip(ip) {
+            return Err(format!("host '{host}' is a blocked private/metadata address"));
+        }
+        return Ok(vec![SocketAddr::new(ip, port)]);
+    }
+
+    let resolved = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|e| format!("DNS resolution for '{host}' failed: {e}"))?;
+    let mut addrs = Vec::new();
+    for addr in resolved {
+        if !allow_private_network && crate::admin::is_blocked_ip(addr.ip()) {
+            return Err(format!(
+                "host '{host}' resolves to a blocked private/metadata address ({})",
+                addr.ip()
+            ));
+        }
+        if !addrs.contains(&addr) {
+            addrs.push(addr);
+        }
+    }
+    if addrs.is_empty() {
+        return Err(format!("DNS resolution for '{host}' returned no addresses"));
+    }
+    Ok(addrs)
+}
+
+fn pinned_plugin_client(host: &str, addrs: &[SocketAddr]) -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .https_only(true)
+        .connect_timeout(Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
+        .http2_adaptive_window(true)
+        .user_agent(concat!("kinetix-plugin-host/", env!("CARGO_PKG_VERSION")))
+        .resolve_to_addrs(host, addrs)
+        .build()
+        .map_err(|e| format!("building pinned outbound client failed: {e}"))
+}
+
 impl bindings::kinetix::plugin::host_http::Host for HostCtx {
     async fn send(
         &mut self,
@@ -397,6 +456,12 @@ impl bindings::kinetix::plugin::host_http::Host for HostCtx {
                 "only https outbound requests are permitted",
             )));
         }
+        if !parsed.username().is_empty() || parsed.password().is_some() {
+            return Ok(Err(err(
+                "invalid_configuration",
+                "outbound URLs may not contain userinfo",
+            )));
+        }
         let Some(host) = parsed.host_str().map(|h| h.to_ascii_lowercase()) else {
             return Ok(Err(err("invalid_configuration", "URL has no host")));
         };
@@ -415,14 +480,33 @@ impl bindings::kinetix::plugin::host_http::Host for HostCtx {
             return Ok(Err(err("permission_denied", "request body too large")));
         }
 
+        // Resolve once, reject every blocked answer, and pin those exact
+        // addresses into reqwest so a second DNS lookup cannot rebind the
+        // request to loopback/private/link-local/metadata space.
+        let port = parsed.port_or_known_default().unwrap_or(443);
+        let addrs = match resolve_plugin_destination(
+            &host,
+            port,
+            self.allow_private_network,
+        )
+        .await
+        {
+            Ok(addrs) => addrs,
+            Err(message) => return Ok(Err(err("permission_denied", message))),
+        };
+        let client = match pinned_plugin_client(&host, &addrs) {
+            Ok(client) => client,
+            Err(message) => return Ok(Err(err("upstream_unavailable", message))),
+        };
+
         // Credential injection is a host responsibility (§8.1). The plugin only
         // references a credential; it never sees the bytes.
         let mut builder = match req.method.to_ascii_uppercase().as_str() {
-            "GET" => self.http.get(parsed.clone()),
-            "POST" => self.http.post(parsed.clone()),
-            "PUT" => self.http.put(parsed.clone()),
-            "DELETE" => self.http.delete(parsed.clone()),
-            "PATCH" => self.http.patch(parsed.clone()),
+            "GET" => client.get(parsed.clone()),
+            "POST" => client.post(parsed.clone()),
+            "PUT" => client.put(parsed.clone()),
+            "DELETE" => client.delete(parsed.clone()),
+            "PATCH" => client.patch(parsed.clone()),
             _ => return Ok(Err(err("invalid_configuration", "unsupported method"))),
         };
         for (k, v) in &req.headers {
