@@ -85,6 +85,7 @@ export const PluginsView: React.FC = () => {
   const [settingDrafts, setSettingDrafts] = useState<Record<string, string | boolean>>({});
   const [rollbackPreview, setRollbackPreview] = useState<PluginRollbackPreview | null>(null);
   const [catalogPreview, setCatalogPreview] = useState<PluginCatalogPreview | null>(null);
+  const [section, setSection] = useState<'discover' | 'installed' | 'updates'>('installed');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -430,6 +431,15 @@ export const PluginsView: React.FC = () => {
   );
   const fullyApproved = selected ? isFullyApproved(selected, permissions) : false;
   const requested = selected ? requestedGrantPairs(selected) : [];
+  const updateEntries = useMemo(
+    () =>
+      catalog.filter((entry) => {
+        const installed = plugins.find((plugin) => plugin.id === entry.id);
+        return installed && installed.version !== entry.latest_version;
+      }),
+    [catalog, plugins],
+  );
+  const visibleCatalog = section === 'updates' ? updateEntries : catalog;
 
   return (
     <div className="space-y-6">
@@ -478,6 +488,25 @@ export const PluginsView: React.FC = () => {
           <span>{notice}</span>
         </div>
       )}
+
+      <div className="flex flex-wrap gap-2 border-b-2 border-[var(--ink)]/15 pb-3">
+        {([
+          ['discover', 'Discover', catalog.length],
+          ['installed', 'Installed', plugins.length],
+          ['updates', 'Updates', updateEntries.length],
+        ] as const).map(([value, label, count]) => (
+          <SketchButton
+            key={value}
+            variant={section === value ? 'primary' : 'secondary'}
+            onClick={() => {
+              setSection(value);
+              setCatalogPreview(null);
+            }}
+          >
+            {label} ({count})
+          </SketchButton>
+        ))}
+      </div>
 
       {showInstall && (
         <WobblyCard decoration="tape" className="p-5">
@@ -551,21 +580,24 @@ export const PluginsView: React.FC = () => {
         </WobblyCard>
       )}
 
-      {catalog.length > 0 && (
+      {section !== 'installed' && visibleCatalog.length > 0 && (
         <WobblyCard variant="muted" className="p-5">
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div>
-              <h3 className="text-xl font-heading font-bold">Discover</h3>
+              <h3 className="text-xl font-heading font-bold">
+                {section === 'updates' ? 'Updates' : 'Discover'}
+              </h3>
               <p className="text-sm font-body text-[var(--ink)]/70">
-                Official catalog metadata is discovery-only. Installing a package still goes through
-                Kinetix&apos;s normal package verification and permission-review flow.
+                {section === 'updates'
+                  ? 'Verified catalog candidates for installed plugins. Review authority changes before upgrading.'
+                  : 'Browse official catalog metadata. Installable packages still go through Kinetix verification and permission review.'}
               </p>
             </div>
             <SketchBadge variant="blue">Official catalog</SketchBadge>
           </div>
 
           <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
-            {catalog.map((entry) => {
+            {visibleCatalog.map((entry) => {
               const installed = plugins.find((plugin) => plugin.id === entry.id);
               return (
                 <div
@@ -714,6 +746,25 @@ export const PluginsView: React.FC = () => {
         </WobblyCard>
       )}
 
+      {section === 'updates' && visibleCatalog.length === 0 && (
+        <WobblyCard variant="muted" className="p-5">
+          <h3 className="font-heading font-bold text-lg">No updates available</h3>
+          <p className="text-sm font-body text-[var(--ink)]/70 mt-1">
+            Installed catalog plugins are already current, or no install-ready catalog update is published.
+          </p>
+        </WobblyCard>
+      )}
+
+      {section === 'discover' && visibleCatalog.length === 0 && (
+        <WobblyCard variant="muted" className="p-5">
+          <h3 className="font-heading font-bold text-lg">Catalog is empty</h3>
+          <p className="text-sm font-body text-[var(--ink)]/70 mt-1">
+            No catalog entries are bundled with this Kinetix build.
+          </p>
+        </WobblyCard>
+      )}
+
+      {section === 'installed' && (
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(280px,0.8fr)_minmax(0,2fr)] gap-6">
         <div className="space-y-3">
           {loading && plugins.length === 0 && (
@@ -1345,6 +1396,8 @@ export const PluginsView: React.FC = () => {
           )}
         </div>
       </div>
+      )}
+
     </div>
   );
 };
