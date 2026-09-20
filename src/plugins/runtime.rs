@@ -828,6 +828,7 @@ mod tests {
         let ctx = HostCtx {
             plugin_id: "test".into(),
             network_hosts: vec![],
+            allow_private_network: false,
             credential_read: false,
             credential_sign: false,
             credential_scopes: vec![],
@@ -837,7 +838,6 @@ mod tests {
             adapter_stream: false,
             buffered_http_allowed: false,
             outbound_count: 0,
-            http: reqwest::Client::new(),
             backing: std::sync::Arc::new(NoBacking),
             limits: wasmtime::StoreLimitsBuilder::new().build(),
         };
@@ -853,6 +853,7 @@ mod tests {
         HostCtx {
             plugin_id: "test".into(),
             network_hosts,
+            allow_private_network: false,
             credential_read: false,
             credential_sign: false,
             credential_scopes: vec![],
@@ -862,10 +863,35 @@ mod tests {
             adapter_stream: false,
             buffered_http_allowed,
             outbound_count: 0,
-            http: reqwest::Client::new(),
             backing: std::sync::Arc::new(NoBacking),
             limits: wasmtime::StoreLimitsBuilder::new().build(),
         }
+    }
+
+    #[tokio::test]
+    async fn plugin_destination_rejects_private_ip_literals_by_default() {
+        for host in ["127.0.0.1", "10.1.2.3", "169.254.169.254", "::1", "fc00::1", "fe80::1"] {
+            let err = resolve_plugin_destination(host, 443, false)
+                .await
+                .unwrap_err();
+            assert!(err.contains("blocked"), "{host}: {err}");
+        }
+    }
+
+    #[tokio::test]
+    async fn plugin_destination_private_override_is_operator_controlled() {
+        let addrs = resolve_plugin_destination("127.0.0.1", 8443, true)
+            .await
+            .unwrap();
+        assert_eq!(addrs, vec!["127.0.0.1:8443".parse().unwrap()]);
+    }
+
+    #[test]
+    fn plugin_destination_blocks_internal_hostnames_before_dns() {
+        for host in ["localhost", "api.localhost", "metadata.google.internal", "db.internal"] {
+            assert!(blocked_plugin_hostname(host), "{host}");
+        }
+        assert!(!blocked_plugin_hostname("api.example.com"));
     }
 
     #[tokio::test]
