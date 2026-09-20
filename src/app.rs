@@ -82,6 +82,26 @@ pub struct StickyEntry {
 type HookJob =
     Box<dyn FnOnce() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send>;
 
+const HOOK_QUEUE_CAPACITY: usize = 1024;
+const MAX_CONCURRENT_HOOK_JOBS: usize = 32;
+
+fn spawn_hook_worker(mut hook_rx: tokio::sync::mpsc::Receiver<HookJob>) {
+    let slots = Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_HOOK_JOBS));
+    tokio::spawn(async move {
+        while let Some(job) = hook_rx.recv().await {
+            let permit = slots
+                .clone()
+                .acquire_owned()
+                .await
+                .expect("hook dispatcher semaphore is never closed");
+            tokio::spawn(async move {
+                let _permit = permit;
+                job().await;
+            });
+        }
+    });
+}
+
 impl AppState {
     pub fn new(
         config: Arc<Config>,
@@ -96,12 +116,9 @@ impl AppState {
         let credentials = Arc::new(StaticKeyStrategy::new(crypto.clone()));
         let sessions = Arc::new(crate::auth::Sessions::new(config.session_ttl_minutes));
         let plugin_auth_sessions = Arc::new(crate::auth::PluginAuthSessions::new());
-        let (hook_tx, mut hook_rx) = tokio::sync::mpsc::channel::<HookJob>(1024);
-        tokio::spawn(async move {
-            while let Some(job) = hook_rx.recv().await {
-                job().await;
-            }
-        });
+        let (hook_tx, hook_rx) =
+            tokio::sync::mpsc::channel::<HookJob>(HOOK_QUEUE_CAPACITY);
+        spawn_hook_worker(hook_rx);
         AppState {
             config,
             pool,
