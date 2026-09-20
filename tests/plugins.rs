@@ -202,6 +202,48 @@ async fn rollback_revalidates_retained_package_and_clears_authority() {
 }
 
 #[tokio::test]
+async fn rollback_preview_reports_semantic_permission_diff() {
+    let (m, _pool) = manager().await;
+    let original = build_kxp(GOOD_MANIFEST, EMPTY_COMPONENT);
+    let original_outcome = m.install(&original, None, &[], false).await.unwrap();
+
+    let upgraded = GOOD_MANIFEST
+        .replace("version = \"1.2.0\"", "version = \"1.3.0\"")
+        .replace(
+            "network_hosts = [\"api.foo.example\"]",
+            "network_hosts = [\"api.foo.example\", \"api.new.example\"]",
+        )
+        .replace(
+            "credential_scopes = [\"provider:foo\"]",
+            "credential_scopes = [\"provider:foo\", \"provider:bar\"]\ncredential_read = true",
+        );
+    m.install(&build_kxp(&upgraded, EMPTY_COMPONENT), None, &[], false)
+        .await
+        .unwrap();
+
+    let preview = m
+        .rollback_preview("dev.example.foo", &original_outcome.package_sha256)
+        .await
+        .unwrap();
+
+    assert_eq!(preview.current_version, "1.3.0");
+    assert_eq!(preview.target_version, "1.2.0");
+    assert!(preview.permission_diff.network_hosts.added.is_empty());
+    assert_eq!(
+        preview.permission_diff.network_hosts.removed,
+        vec!["api.new.example".to_string()]
+    );
+    assert!(preview.permission_diff.credential_scopes.added.is_empty());
+    assert_eq!(
+        preview.permission_diff.credential_scopes.removed,
+        vec!["provider:bar".to_string()]
+    );
+    assert!(preview.permission_diff.credential_read.changed);
+    assert!(preview.permission_diff.credential_read.from);
+    assert!(!preview.permission_diff.credential_read.to);
+}
+
+#[tokio::test]
 async fn rollback_rejects_tampered_retained_package() {
     let (m, pool) = manager().await;
     let original = build_kxp(GOOD_MANIFEST, EMPTY_COMPONENT);
