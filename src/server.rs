@@ -271,6 +271,98 @@ pub fn spawn_background_tasks(state: AppState) {
         });
     }
 
+    // Cached routing facts (§6.4). Refresh them off the request path on the
+    // manifest-requested cadence. The request path only reads the last
+    // host-stamped snapshot, so no plugin/network wall time enters routing.
+    if let Some(manager) = state.plugin_manager().cloned() {
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(1));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            let mut next_due: std::collections::HashMap<String, tokio::time::Instant> =
+                std::collections::HashMap::new();
+
+            loop {
+                tick.tick().await;
+                let rows = match manager.list().await {
+                    Ok(rows) => rows,
+                    Err(error) => {
+                        tracing::debug!(error = %error, "listing plugins for cached routing fact refresh failed");
+                        continue;
+                    }
+                };
+
+                let now = tokio::time::Instant::now();
+                let mut active = std::collections::HashSet::new();
+                let mut due = Vec::new();
+
+                for row in rows {
+                    if !row.status().is_enabled() {
+                        continue;
+                    }
+                    let Some(manifest) = row.manifest() else {
+                        continue;
+                    };
+                    if manifest.routing_facts_mode != "cached"
+                        || manifest.provides.routing_facts.is_empty()
+                    {
+                        continue;
+                    }
+
+                    active.insert(row.id.clone());
+                    let is_due = next_due
+                        .get(&row.id)
+                        .map(|deadline| *deadline <= now)
+                        .unwrap_or(true);
+                    if !is_due {
+                        continue;
+                    }
+
+                    next_due.insert(
+                        row.id.clone(),
+                        now + Duration::from_millis(manifest.routing_facts_refresh_ms),
+                    );
+                    due.push(row.id);
+                }
+
+                next_due.retain(|plugin_id, _| active.contains(plugin_id));
+
+                let mut jobs = tokio::task::JoinSet::new();
+                for plugin_id in due {
+                    let manager = manager.clone();
+                    jobs.spawn(async move {
+                        let result = manager.refresh_cached_routing_facts(&plugin_id).await;
+                        (plugin_id, result)
+                    });
+                }
+
+                while let Some(joined) = jobs.join_next().await {
+                    match joined {
+                        Ok((plugin_id, Ok(count))) => {
+                            tracing::debug!(
+                                plugin = %plugin_id,
+                                facts = count,
+                                "refreshed cached plugin routing facts"
+                            );
+                        }
+                        Ok((plugin_id, Err(error))) => {
+                            tracing::debug!(
+                                plugin = %plugin_id,
+                                error = %error.message(),
+                                "cached plugin routing fact refresh failed"
+                            );
+                        }
+                        Err(error) => {
+                            tracing::debug!(
+                                error = %error,
+                                "cached plugin routing fact refresh task failed"
+                            );
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     // Per-plugin health probes (§6.5). Run on a background schedule owned by
     // core, never lazily on the routing path, so a cold account never pays a
     // probe's wall time inside a client request (NFR-1.1/1.2).
