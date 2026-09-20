@@ -455,6 +455,8 @@ impl Adapter for GeminiAdapter {
                         .map(String::from),
                     context_window: m.get("inputTokenLimit").and_then(|v| v.as_i64()),
                     max_output_tokens: m.get("outputTokenLimit").and_then(|v| v.as_i64()),
+                    capabilities: None,
+                    raw_metadata: None,
                 });
             }
         }
