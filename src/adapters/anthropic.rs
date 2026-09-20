@@ -482,6 +482,8 @@ impl Adapter for AnthropicAdapter {
                             .and_then(|v| v.as_str())
                             .map(String::from),
                         context_window: None,
+                        capabilities: None,
+                        raw_metadata: None,
                         max_output_tokens: None,
                     });
                 }
