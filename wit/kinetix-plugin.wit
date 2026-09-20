@@ -121,10 +121,11 @@ interface host-storage {
   get: func(key: string) -> option<list<u8>>;
   put: func(key: string, value: list<u8>) -> result<_, string>;
   delete: func(key: string) -> result<_, string>;
-  /// Publish a cached routing fact under the reserved `_cache:<name>`
-  /// namespace. The host stamps `observed-at`, enforces `max-age-ms`, and makes
-  /// the value readable to `routing-facts` on the request path without any
-  /// network or heavy work (§6.4). `value-json` must be valid JSON.
+  /// Publish a cached routing fact during the core-owned background refresh.
+  /// The value is buffered for the current invocation; only after the guest
+  /// call succeeds does the host stamp `observed-at` and atomically replace
+  /// the complete reserved `_cache:<name>` snapshot (§6.4). Direct put/delete
+  /// access to the `_cache:` namespace is rejected. `value-json` must be JSON.
   cache-set: func(name: string, value-json: string, max-age-ms: u64) -> result<_, string>;
 }
 
