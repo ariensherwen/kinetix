@@ -1,8 +1,8 @@
 //! OpenAI Responses API inbound frontend (POST /v1/responses).
 //!
-//! Provides full compatibility with OpenAI's Responses API specification,
-//! supporting both streaming SSE events (response.created, response.output_item.added,
-//! response.output_text.delta, response.completed) and non-streaming responses.
+//! Implements Kinetix's explicitly supported translated subset of the OpenAI
+//! Responses API. Kinetix does not provide native Responses upstream passthrough
+//! or response-object storage/chaining; unsupported semantics fail closed.
 
 use bytes::Bytes;
 use serde_json::{json, Value};
@@ -21,6 +21,7 @@ pub fn decode_request(body: Value) -> Result<InternalRequest, ProxyError> {
     let obj = body
         .as_object()
         .ok_or_else(|| ProxyError::bad_request("request body must be a JSON object"))?;
+    validate_supported_subset(obj)?;
 
     let model = obj
         .get("model")
@@ -28,7 +29,6 @@ pub fn decode_request(body: Value) -> Result<InternalRequest, ProxyError> {
         .ok_or_else(|| ProxyError::bad_request("missing required field 'model'"))?
         .to_string();
 
-    let mut translation_issues = nested_translation_issues(obj);
     let mut system = Vec::new();
 
     // 1. Optional instructions field (Responses API system-instruction convention).
@@ -92,31 +92,16 @@ pub fn decode_request(body: Value) -> Result<InternalRequest, ProxyError> {
 
     let stream = obj.get("stream").and_then(|s| s.as_bool()).unwrap_or(false);
 
-    // 6. Keep unrecognized fields for optional forwarding / passthrough
-    let mut extra = serde_json::Map::new();
-    const KNOWN: [&str; 12] = [
-        "model",
-        "input",
-        "instructions",
-        "tools",
-        "tool_choice",
-        "temperature",
-        "top_p",
-        "top_k",
-        "max_output_tokens",
-        "max_tokens",
-        "stream",
-        "reasoning",
-    ];
-    for (k, v) in obj {
-        if !KNOWN.contains(&k.as_str()) {
-            extra.insert(k.clone(), v.clone());
-        }
+    // Responses input is always translated through Kinetix's canonical model;
+    // there is no native Responses passthrough. Unknown top-level semantics are
+    // rejected by validate_supported_subset instead of being carried as extras.
+    let extra = serde_json::Map::new();
+    let identity_issues = crate::frontends::resolve_tool_result_names(&mut out_messages);
+    if let Some(issue) = identity_issues.first() {
+        return Err(ProxyError::unsupported(format!(
+            "Responses API tool-call state is not translatable: {issue}"
+        )));
     }
-    translation_issues.extend(crate::frontends::resolve_tool_result_names(
-        &mut out_messages,
-    ));
-    crate::frontends::attach_translation_issues(&mut extra, translation_issues);
 
     Ok(InternalRequest {
         requested_model: model,
@@ -132,6 +117,229 @@ pub fn decode_request(body: Value) -> Result<InternalRequest, ProxyError> {
         extra,
         raw_body: None,
     })
+}
+
+fn validate_supported_subset(obj: &serde_json::Map<String, Value>) -> Result<(), ProxyError> {
+    const SUPPORTED: [&str; 23] = [
+        "model",
+        "input",
+        "instructions",
+        "tools",
+        "tool_choice",
+        "temperature",
+        "top_p",
+        "top_k",
+        "max_output_tokens",
+        "max_tokens",
+        "presence_penalty",
+        "frequency_penalty",
+        "stream",
+        "reasoning",
+        "reasoning_effort",
+        "store",
+        "background",
+        "text",
+        "stream_options",
+        "truncation",
+        "parallel_tool_calls",
+        "metadata",
+        "include",
+    ];
+
+    for key in obj.keys() {
+        if !SUPPORTED.contains(&key.as_str()) {
+            return Err(ProxyError::unsupported(format!(
+                "Responses API field '{key}' is not supported by Kinetix's translated subset"
+            )));
+        }
+    }
+
+    if obj.get("stream").is_some_and(|value| !value.is_boolean()) {
+        return Err(ProxyError::bad_request(
+            "Responses API 'stream' must be boolean",
+        ));
+    }
+    for key in ["store", "background"] {
+        if obj.get(key).is_some_and(|value| !value.is_boolean()) {
+            return Err(ProxyError::bad_request(format!(
+                "Responses API '{key}' must be boolean"
+            )));
+        }
+    }
+    for key in [
+        "temperature",
+        "top_p",
+        "top_k",
+        "presence_penalty",
+        "frequency_penalty",
+    ] {
+        if obj.get(key).is_some_and(|value| !value.is_number()) {
+            return Err(ProxyError::bad_request(format!(
+                "Responses API '{key}' must be numeric"
+            )));
+        }
+    }
+    for key in ["max_output_tokens", "max_tokens"] {
+        if obj.get(key).is_some_and(|value| value.as_u64().is_none()) {
+            return Err(ProxyError::bad_request(format!(
+                "Responses API '{key}' must be a non-negative integer"
+            )));
+        }
+    }
+
+    if obj.get("store").and_then(Value::as_bool) == Some(true) {
+        return Err(ProxyError::unsupported(
+            "Responses API 'store: true' is unsupported; Kinetix does not persist response objects",
+        ));
+    }
+    if obj.get("background").and_then(Value::as_bool) == Some(true) {
+        return Err(ProxyError::unsupported(
+            "Responses API background mode is unsupported",
+        ));
+    }
+    if obj.get("parallel_tool_calls").is_some() {
+        return Err(ProxyError::unsupported(
+            "Responses API 'parallel_tool_calls' is not enforceable on translated upstreams",
+        ));
+    }
+    if obj.get("metadata").is_some() {
+        return Err(ProxyError::unsupported(
+            "Responses API response metadata storage is unsupported",
+        ));
+    }
+    if let Some(include) = obj.get("include") {
+        let items = include
+            .as_array()
+            .ok_or_else(|| ProxyError::bad_request("Responses API 'include' must be an array"))?;
+        if !items.is_empty() {
+            return Err(ProxyError::unsupported(
+                "Responses API 'include' expansions are unsupported",
+            ));
+        }
+    }
+
+    if let Some(truncation) = obj.get("truncation").and_then(Value::as_str) {
+        if truncation != "disabled" {
+            return Err(ProxyError::unsupported(
+                "Responses API automatic truncation is unsupported; only 'disabled' is accepted",
+            ));
+        }
+    }
+
+    if let Some(text) = obj.get("text") {
+        let text = text
+            .as_object()
+            .ok_or_else(|| ProxyError::bad_request("Responses API 'text' must be an object"))?;
+        for key in text.keys() {
+            if key != "format" {
+                return Err(ProxyError::unsupported(format!(
+                    "Responses API text.{key} is unsupported"
+                )));
+            }
+        }
+        if let Some(format) = text.get("format") {
+            let format = format.as_object().ok_or_else(|| {
+                ProxyError::bad_request("Responses API 'text.format' must be an object")
+            })?;
+            for key in format.keys() {
+                if key != "type" {
+                    return Err(ProxyError::unsupported(format!(
+                        "Responses API text.format.{key} is unsupported"
+                    )));
+                }
+            }
+            let kind = format.get("type").and_then(Value::as_str).unwrap_or("text");
+            if kind != "text" {
+                return Err(ProxyError::unsupported(
+                    "Responses API structured text.format is unsupported on translated upstreams",
+                ));
+            }
+        }
+    }
+
+    if let Some(options) = obj.get("stream_options") {
+        let options = options.as_object().ok_or_else(|| {
+            ProxyError::bad_request("Responses API 'stream_options' must be an object")
+        })?;
+        for (key, value) in options {
+            match key.as_str() {
+                "include_obfuscation" if value.as_bool() == Some(false) => {}
+                "include_obfuscation" => {
+                    return Err(ProxyError::unsupported(
+                        "Responses API stream obfuscation is unsupported",
+                    ));
+                }
+                _ => {
+                    return Err(ProxyError::unsupported(format!(
+                        "Responses API stream_options.{key} is unsupported"
+                    )));
+                }
+            }
+        }
+    }
+
+    if let Some(reasoning) = obj.get("reasoning") {
+        let reasoning = reasoning.as_object().ok_or_else(|| {
+            ProxyError::bad_request("Responses API 'reasoning' must be an object")
+        })?;
+        for key in reasoning.keys() {
+            if key != "effort" {
+                return Err(ProxyError::unsupported(format!(
+                    "Responses API reasoning.{key} is unsupported; only reasoning.effort is translated"
+                )));
+            }
+        }
+        if let Some(effort) = reasoning.get("effort") {
+            let effort = effort.as_str().ok_or_else(|| {
+                ProxyError::bad_request("Responses API reasoning.effort must be a string")
+            })?;
+            if map_reasoning_effort(effort).is_none() {
+                return Err(ProxyError::unsupported(format!(
+                    "Responses API reasoning effort '{effort}' is unsupported"
+                )));
+            }
+        }
+    }
+    if let Some(effort) = obj.get("reasoning_effort") {
+        let effort = effort.as_str().ok_or_else(|| {
+            ProxyError::bad_request("Responses API reasoning_effort must be a string")
+        })?;
+        if map_reasoning_effort(effort).is_none() {
+            return Err(ProxyError::unsupported(format!(
+                "Responses API reasoning effort '{effort}' is unsupported"
+            )));
+        }
+    }
+
+    if let Some(choice) = obj.get("tool_choice") {
+        match choice {
+            Value::String(value) if matches!(value.as_str(), "auto" | "none" | "required") => {}
+            Value::Object(value)
+                if value.get("type").and_then(Value::as_str) == Some("function")
+                    && value
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .is_some_and(|name| !name.is_empty())
+                    && value
+                        .keys()
+                        .all(|key| matches!(key.as_str(), "type" | "name")) => {}
+            Value::Null => {}
+            _ => {
+                return Err(ProxyError::unsupported(
+                    "Responses API tool_choice supports only auto/none/required or a named function",
+                ));
+            }
+        }
+    }
+
+    let nested = nested_translation_issues(obj);
+    if let Some(issue) = nested.first() {
+        return Err(ProxyError::unsupported(format!(
+            "Responses API content is outside Kinetix's translated subset: {issue}"
+        )));
+    }
+
+    Ok(())
 }
 
 fn nested_translation_issues(obj: &serde_json::Map<String, Value>) -> Vec<String> {
@@ -178,6 +386,40 @@ fn nested_translation_issues(obj: &serde_json::Map<String, Value>) -> Vec<String
                 issues.push(format!(
                     "tools[{tool_index}] type '{kind}' has no canonical cross-format representation"
                 ));
+                continue;
+            }
+            if tool.get("function").is_some() {
+                for key in tool
+                    .as_object()
+                    .into_iter()
+                    .flat_map(|object| object.keys())
+                {
+                    if !matches!(key.as_str(), "type" | "function") {
+                        issues.push(format!(
+                            "tools[{tool_index}].{key} has unsupported function-tool semantics"
+                        ));
+                    }
+                }
+            }
+            let function = tool.get("function").unwrap_or(tool);
+            if function.get("strict").and_then(Value::as_bool) == Some(true) {
+                issues.push(format!(
+                    "tools[{tool_index}].strict=true cannot be enforced on translated upstreams"
+                ));
+            }
+            for key in function
+                .as_object()
+                .into_iter()
+                .flat_map(|object| object.keys())
+            {
+                if !matches!(
+                    key.as_str(),
+                    "type" | "name" | "description" | "parameters" | "strict" | "function"
+                ) {
+                    issues.push(format!(
+                        "tools[{tool_index}].{key} has unsupported function-tool semantics"
+                    ));
+                }
             }
         }
     }
@@ -237,11 +479,18 @@ fn decode_input_item(
                 .get("call_id")
                 .or_else(|| item.get("id"))
                 .and_then(|v| v.as_str())
-                .map(String::from);
+                .filter(|value| !value.is_empty())
+                .map(String::from)
+                .ok_or_else(|| {
+                    ProxyError::bad_request("Responses function_call requires a non-empty call_id")
+                })?;
             let name = item
                 .get("name")
                 .and_then(|v| v.as_str())
-                .unwrap_or("")
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    ProxyError::bad_request("Responses function_call requires a non-empty name")
+                })?
                 .to_string();
             let args = item
                 .get("arguments")
@@ -253,7 +502,7 @@ fn decode_input_item(
             out.push(Message {
                 role: Role::Assistant,
                 parts: vec![Part::ToolCall {
-                    id: call_id,
+                    id: Some(call_id),
                     name,
                     arguments: args,
                     signature: None,
@@ -265,7 +514,12 @@ fn decode_input_item(
             let call_id = item
                 .get("call_id")
                 .and_then(|v| v.as_str())
-                .unwrap_or("")
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    ProxyError::bad_request(
+                        "Responses function_call_output requires a non-empty call_id",
+                    )
+                })?
                 .to_string();
             let content = match item.get("output") {
                 Some(Value::String(s)) => s.clone(),
@@ -539,13 +793,13 @@ impl ResponsesEncoder {
                 "created_at": self.ctx.created,
                 "model": self.ctx.model_name,
                 "status": "in_progress",
-                "output": []
+                "error": null,
+                "incomplete_details": null,
+                "output": [],
+                "usage": null
             });
-            out.push(self.frame("response.created", json!({ "response": resp_obj })));
-            out.push(self.frame(
-                "response.in_progress",
-                json!({ "response_id": self.response_id }),
-            ));
+            out.push(self.frame("response.created", json!({ "response": resp_obj.clone() })));
+            out.push(self.frame("response.in_progress", json!({ "response": resp_obj })));
         }
     }
 
@@ -654,19 +908,10 @@ impl ResponsesEncoder {
                     }),
                 ));
             }
-            StreamEvent::ThinkingDelta { text, .. } => {
-                self.ensure_created(&mut out);
-                // Responses API optionally supports reasoning deltas
-                if !text.is_empty() {
-                    out.push(self.frame(
-                        "response.reasoning_text.delta",
-                        json!({
-                            "response_id": self.response_id,
-                            "output_index": 0,
-                            "delta": text
-                        }),
-                    ));
-                }
+            StreamEvent::ThinkingDelta { .. } => {
+                // Raw provider reasoning is not a Responses reasoning-summary
+                // item. reasoning.effort is supported as an input control, but
+                // reasoning output items/summaries are outside this subset.
             }
             StreamEvent::ToolCallStart {
                 index, id, name, ..
@@ -747,6 +992,7 @@ impl ResponsesEncoder {
                             "output_index": tool_output_index,
                             "item_id": tool_call_id,
                             "call_id": tool_call_id,
+                            "name": tool_name,
                             "arguments": tool_arguments
                         }),
                     ));
@@ -770,11 +1016,9 @@ impl ResponsesEncoder {
                 out.push(self.frame(
                     "response.completed",
                     json!({
-                        "response_id": self.response_id,
                         "response": final_resp
                     }),
                 ));
-                out.push(crate::frontends::sse_frame(None, "[DONE]"));
             }
         }
         out
@@ -838,17 +1082,21 @@ impl ResponsesEncoder {
     }
 
     pub fn error_frame(&mut self, message: &str) -> Vec<Bytes> {
-        let frame = json!({
-            "type": "response.failed",
-            "sequence_number": self.seq,
-            "response_id": self.response_id,
+        let response = json!({
+            "id": self.response_id,
+            "object": "response",
+            "created_at": self.ctx.created,
+            "model": self.ctx.model_name,
+            "status": "failed",
             "error": {
                 "message": message,
-                "type": "internal_error",
                 "code": "stream_error"
-            }
+            },
+            "incomplete_details": null,
+            "output": [],
+            "usage": null
         });
-        vec![sse_frame(Some("response.failed"), &frame.to_string())]
+        vec![self.frame("response.failed", json!({ "response": response }))]
     }
 }
 

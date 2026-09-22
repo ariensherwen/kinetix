@@ -206,7 +206,7 @@ client
 
 ## Point a client at Kinetix
 
-Kinetix supports OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages clients.
+Kinetix supports OpenAI Chat Completions, a documented translated subset of OpenAI Responses, and Anthropic Messages clients.
 
 ### OpenAI-compatible clients
 
@@ -248,13 +248,15 @@ POST /v1/messages
 
 ### OpenAI Responses clients
 
-Modern coding agents that use the Responses API can use:
+Modern coding agents can use:
 
 ```text
 POST /v1/responses
 ```
 
-See [Compatibility](https://github.com/PrightCord/kinetix/blob/main/docs/compatibility.md) for protocol behavior and documented deviations.
+This endpoint implements Kinetix's translated Responses subset, not native
+Responses storage/chaining or hosted tools. Unsupported semantics are rejected
+explicitly. See [Compatibility](https://github.com/PrightCord/kinetix/blob/main/docs/compatibility.md) for the supported request and streaming contract.
 
 See [Pi Compatibility](https://github.com/PrightCord/kinetix/blob/main/docs/pi-compatibility.md) for Pi-specific setup and acceptance notes.
 

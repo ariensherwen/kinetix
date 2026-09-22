@@ -211,13 +211,14 @@ fn unsupported_nested_content_is_marked_for_translation_rejection() {
     );
     assert!(frontends::translation_unsupported(&anthropic_tool_image.extra).is_some());
 
-    let responses_file = responses(
-        r#"{
-          "model":"m",
-          "input":[{"type":"file_search_call","id":"fs_1"}]
-        }"#,
+    let responses_file = frontends::decode(
+        FrontendFormat::OpenAiResponses,
+        serde_json::json!({
+            "model":"m",
+            "input":[{"type":"file_search_call","id":"fs_1"}]
+        }),
     );
-    assert!(frontends::translation_unsupported(&responses_file.extra).is_some());
+    assert!(responses_file.is_err());
 }
 
 #[test]
@@ -307,6 +308,72 @@ fn responses_plain_string_input_and_instructions() {
         Part::Text(t) => assert_eq!(t, "Solve 2+2"),
         other => panic!("expected text part, got {other:?}"),
     }
+}
+
+#[test]
+fn responses_rejects_stateful_hosted_and_untranslated_semantics() {
+    let cases = [
+        serde_json::json!({
+            "model":"m",
+            "input":"hi",
+            "previous_response_id":"resp_prev"
+        }),
+        serde_json::json!({
+            "model":"m",
+            "input":"hi",
+            "tools":[{"type":"web_search"}]
+        }),
+        serde_json::json!({
+            "model":"m",
+            "input":"hi",
+            "include":["reasoning.encrypted_content"]
+        }),
+        serde_json::json!({
+            "model":"m",
+            "input":"hi",
+            "text":{"format":{"type":"json_schema","name":"x","schema":{"type":"object"}}}
+        }),
+        serde_json::json!({
+            "model":"m",
+            "input":"hi",
+            "reasoning":{"effort":"high","summary":"auto"}
+        }),
+        serde_json::json!({
+            "model":"m",
+            "input":"hi",
+            "tools":[{"type":"function","name":"f","parameters":{},"strict":true}]
+        }),
+        serde_json::json!({
+            "model":"m",
+            "input":"hi",
+            "unknown_future_semantic":{"enabled":true}
+        }),
+    ];
+
+    for body in cases {
+        let result = frontends::decode(FrontendFormat::OpenAiResponses, body);
+        assert!(
+            result.is_err(),
+            "unsupported Responses semantic was accepted"
+        );
+    }
+}
+
+#[test]
+fn responses_accepts_explicit_safe_defaults() {
+    let req = responses(
+        r#"{
+          "model":"m",
+          "input":"hi",
+          "store":false,
+          "background":false,
+          "truncation":"disabled",
+          "text":{"format":{"type":"text"}},
+          "stream_options":{"include_obfuscation":false}
+        }"#,
+    );
+    assert_eq!(req.requested_model, "m");
+    assert_eq!(req.messages.len(), 1);
 }
 
 #[test]

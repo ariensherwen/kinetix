@@ -1,6 +1,6 @@
 # Kinetix
 
-**Kinetix is a self-hosted LLM gateway for coding agents and small technical teams.** It exposes OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages APIs while routing requests across Gemini, OpenAI-compatible, and Anthropic upstreams.
+**Kinetix is a self-hosted LLM gateway for coding agents and small technical teams.** It exposes OpenAI Chat Completions, a documented translated subset of OpenAI Responses, and Anthropic Messages while routing requests across Gemini, OpenAI-compatible, and Anthropic upstreams.
 
 Use virtual keys, account pools, executable Routes, automatic fallback, usage and cost controls, and an embedded admin dashboard — all from a single Rust binary.
 
@@ -17,7 +17,7 @@ Kinetix puts those concerns behind one endpoint.
 
 | Capability                    | What Kinetix provides                                                                                |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------- |
-| **Protocol compatibility**    | OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages inbound APIs                       |
+| **Protocol compatibility**    | OpenAI Chat Completions, translated OpenAI Responses subset, and Anthropic Messages inbound APIs     |
 | **Provider portability**      | Gemini, OpenAI-compatible, and Anthropic outbound adapters selected by wire format                   |
 | **Virtual keys**              | Per-client model access, RPM/TPM limits, budgets, expiry, IP restrictions, and optional body logging |
 | **Account pools**             | Multiple credentials per provider with health state, cooldowns, quotas, and automatic failover       |

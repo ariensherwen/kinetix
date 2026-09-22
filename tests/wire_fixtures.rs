@@ -257,9 +257,43 @@ fn responses_streaming_wire_output_is_stable() {
         "missing status completed in response object"
     );
     assert!(
-        joined_out.ends_with("data: [DONE]\n\n"),
-        "stream must end with [DONE]"
+        !joined_out.contains("[DONE]"),
+        "Responses streaming must terminate with response.completed, not Chat Completions [DONE]"
     );
+    let in_progress = joined_out
+        .split("event: response.in_progress\n")
+        .nth(1)
+        .and_then(|rest| rest.split("\n\n").next())
+        .expect("response.in_progress frame");
+    assert!(
+        in_progress.contains("\"response\":{"),
+        "response.in_progress must carry a response object"
+    );
+    assert!(
+        !in_progress.contains("\"response_id\":"),
+        "response.in_progress must not use the old response_id-only shape"
+    );
+}
+
+#[test]
+fn responses_stream_does_not_expose_raw_provider_reasoning() {
+    let mut enc = frontends::Encoder::new(FrontendFormat::OpenAiResponses, ctx());
+    let mut out = Vec::new();
+    out.extend(enc.encode(StreamEvent::Start {
+        upstream_request_id: Some("up-1".into()),
+    }));
+    out.extend(enc.encode(StreamEvent::ThinkingDelta {
+        text: "private provider reasoning".into(),
+        signature: Some("opaque".into()),
+    }));
+    out.extend(enc.encode(StreamEvent::TextDelta("answer".into())));
+    out.extend(enc.encode(StreamEvent::Finish(FinishReason::Stop)));
+
+    let got = joined(&out);
+    assert!(!got.contains("response.reasoning_text"));
+    assert!(!got.contains("private provider reasoning"));
+    assert!(got.contains("response.output_text.delta"));
+    assert!(got.contains("response.completed"));
 }
 
 #[test]
@@ -303,6 +337,19 @@ fn responses_error_frame_is_native() {
     assert!(
         got.contains("\"type\":\"response.failed\""),
         "missing type field: {got}"
+    );
+    let failed = got
+        .split("event: response.failed\n")
+        .nth(1)
+        .and_then(|rest| rest.split("\n\n").next())
+        .expect("response.failed frame");
+    assert!(
+        failed.contains("\"response\":{"),
+        "response.failed must carry the failed response object: {got}"
+    );
+    assert!(
+        got.contains("\"status\":\"failed\""),
+        "failed response status missing: {got}"
     );
 }
 

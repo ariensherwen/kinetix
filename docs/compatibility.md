@@ -47,17 +47,34 @@ routed independently. Pi sends `X-Session-Id` when configured with
 
 ## OpenAI Responses API Clients (Next-Gen Coding Agents)
 
-Kinetix serves `POST /v1/responses` for modern agentic tools and coding CLI agents
-(such as Codex CLI):
+Kinetix serves an **explicit translated subset** of `POST /v1/responses`. It
+normalizes supported Responses requests into Kinetix's canonical request model
+and routes them through Gemini, OpenAI-compatible Chat Completions, Anthropic,
+or plugin adapters. There is currently **no native Responses upstream
+passthrough or Responses object store**.
 
-- **Lifecycle events**: Full hierarchical SSE emission (`response.created`,
-  `response.in_progress`, `response.output_item.added`, `response.content_part.added`,
-  `response.output_text.delta`, `response.output_text.done`, `response.content_part.done`,
-  `response.output_item.done`, `response.completed`).
-- **Function calling**: First-class streaming via `response.output_item.added` (item type
-  `function_call`), argument streaming deltas, and completion item.
-- **Multi-turn input**: Accepts flat text prompts, structured `instructions`, and input item
-  arrays chaining messages, function calls, and function call outputs.
+Supported request semantics:
+
+- text input, `instructions`, message input items, and URL/data-URL image input;
+- custom function tools, function-call history, and function-call outputs;
+- `tool_choice`: `auto`, `none`, `required`, or one named function;
+- `temperature`, `top_p`, `max_output_tokens`, and Kinetix compatibility
+  aliases/controls already represented by the canonical model;
+- `reasoning.effort` as an input control when the selected model has an
+  explicit thinking mapping;
+- streaming and non-streaming output for text and custom function calls.
+
+Streaming emits the supported semantic lifecycle events:
+`response.created`, `response.in_progress`, output/content item events,
+`response.output_text.*`, function-call argument events, and
+`response.completed`. `response.completed` is terminal; Kinetix does not add
+the Chat Completions `[DONE]` sentinel.
+
+Unsupported semantics fail explicitly instead of being approximated. This
+includes `previous_response_id`/conversation state, response storage,
+background responses, hosted/MCP/computer/code-interpreter tools,
+`include` expansions, structured `text.format`, reasoning summaries/output
+items, automatic truncation, metadata storage, and unknown Responses fields.
 
 ## Coding-Agent Compatibility CI Matrix
 
@@ -71,8 +88,10 @@ upstreams:
 | **Next-Gen / Codex CLI** | `/v1/responses` | Plain streaming, tool calling, input chaining, session affinity, sync fallback |
 | **Claude Code / Anthropic Agent** | `/v1/messages` | Plain streaming, tool calling, tool result continuation, session affinity, sync fallback |
 
-Every scenario is tested against both same-format passthrough (OpenAI) and cross-format
-translating adapters (Gemini) with zero external test runner dependencies.
+Chat Completions scenarios cover same-format OpenAI passthrough and translated
+Gemini paths. Responses scenarios exercise Kinetix's translated Responses
+frontend; native Responses upstream passthrough is not implemented. The matrix
+has zero external test runner dependencies.
 
 ## Anthropic-format clients
 
