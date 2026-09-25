@@ -1408,7 +1408,7 @@ mod tests {
     fn canonical_lookup_is_case_insensitive_only_when_unique() {
         let catalog = models_dev_fixture();
         let resolved = resolve_with_bundled(
-            "https://api.b.ai/v1",
+            "https://unknown.example/v1",
             "DeepSeek-V4.1-Flash",
             None,
             Some(&catalog),
