@@ -1328,8 +1328,7 @@ fn discovered_observation_with_catalog(
 
     for layer in &catalog_layers {
         let source = layer.provenance().to_string();
-        let layer_flags =
-            plugin_capability_flags_v1(layer.capabilities_json).unwrap_or_default();
+        let layer_flags = plugin_capability_flags_v1(layer.capabilities_json).unwrap_or_default();
 
         if layer_flags.text.is_some() {
             catalog_flags.text = layer_flags.text;
