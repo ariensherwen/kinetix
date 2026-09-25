@@ -392,8 +392,11 @@ impl ModelsDevCatalog {
         }))
     }
 
-    pub async fn fetch(client: &reqwest::Client, base_url: &str) -> Option<Self> {
-        if should_skip_external_lookup(base_url) {
+    pub async fn fetch(client: &reqwest::Client, _base_url: &str) -> Option<Self> {
+        // The catalog destination is fixed and never derived from provider input.
+        // Apply the existing SSRF/private-network guard to the actual outbound
+        // destination rather than suppressing enrichment for private gateways.
+        if should_skip_external_lookup(MODELS_DEV_CATALOG_URL) {
             return None;
         }
         let response = client
