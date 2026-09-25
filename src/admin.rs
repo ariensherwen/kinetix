@@ -1065,6 +1065,11 @@ struct DiscoveredObservation {
     price_sources: Value,
     raw_metadata: Option<Value>,
     raw_metadata_truncated: bool,
+    canonical_identity: Option<Value>,
+    canonical_model_id: Option<String>,
+    canonical_match: Option<String>,
+    model_type: Option<String>,
+    execution_supported: bool,
     catalog: Option<Value>,
 }
 
@@ -1222,7 +1227,7 @@ fn price_source(
     if provider.is_some() {
         Some("provider_metadata".to_string())
     } else if plugin.is_some() {
-        Some("plugin".to_string())
+        Some("plugin_capabilities_json".to_string())
     } else if catalog.is_some() {
         catalog_source.map(str::to_string)
     } else {
@@ -1285,16 +1290,120 @@ fn discovered_observation_with_catalog(
     provider_metadata: Option<Value>,
     fallback_metadata: Option<Value>,
     wire: WireFormat,
-    catalog: Option<crate::model_catalog::CatalogMatch>,
+    catalog: Option<crate::model_catalog::CatalogResolution>,
 ) -> DiscoveredObservation {
-    let catalog_source = catalog.as_ref().map(|entry| entry.provenance().to_string());
-    let catalog_metadata = catalog.as_ref().map(|entry| &entry.capabilities_json);
+    fn has_reasoning_details(capability: &crate::adapters::ReasoningCapability) -> bool {
+        capability.mode.is_some() || !capability.levels.is_empty() || capability.default.is_some()
+    }
+
+    let catalog_layers = catalog
+        .as_ref()
+        .map(crate::model_catalog::CatalogResolution::layers)
+        .unwrap_or_default();
+
+    let mut catalog_flags = ModelCapabilityFlags::default();
+    let mut catalog_text_source = None;
+    let mut catalog_reasoning_source = None;
+    let mut catalog_vision_source = None;
+    let mut catalog_tools_source = None;
+    let mut catalog_structured_source = None;
+
+    let mut catalog_context_window = None;
+    let mut catalog_context_source = None;
+    let mut catalog_max_output_tokens = None;
+    let mut catalog_max_output_source = None;
+    let mut catalog_modalities = None;
+    let mut catalog_model_type = None;
+    let mut catalog_model_type_source = None;
+
+    let mut catalog_prices = Prices::default();
+    let mut catalog_input_price_source = None;
+    let mut catalog_output_price_source = None;
+    let mut catalog_cached_price_source = None;
+    let mut catalog_cache_write_price_source = None;
+    let mut catalog_thinking_price_source = None;
+
+    let mut catalog_reasoning = None;
+    let mut catalog_detailed_reasoning = None;
+
+    for layer in &catalog_layers {
+        let source = layer.provenance().to_string();
+        let layer_flags =
+            plugin_capability_flags_v1(layer.capabilities_json).unwrap_or_default();
+
+        if layer_flags.text.is_some() {
+            catalog_flags.text = layer_flags.text;
+            catalog_text_source = Some(source.clone());
+        }
+        if layer_flags.reasoning.is_some() {
+            catalog_flags.reasoning = layer_flags.reasoning;
+            catalog_reasoning_source = Some(source.clone());
+        }
+        if layer_flags.vision.is_some() {
+            catalog_flags.vision = layer_flags.vision;
+            catalog_vision_source = Some(source.clone());
+        }
+        if layer_flags.tool_calling.is_some() {
+            catalog_flags.tool_calling = layer_flags.tool_calling;
+            catalog_tools_source = Some(source.clone());
+        }
+        if layer_flags.structured_output.is_some() {
+            catalog_flags.structured_output = layer_flags.structured_output;
+            catalog_structured_source = Some(source.clone());
+        }
+
+        if let Some(value) = layer.context_window {
+            catalog_context_window = Some(value);
+            catalog_context_source = Some(source.clone());
+        }
+        if let Some(value) = layer.max_output_tokens {
+            catalog_max_output_tokens = Some(value);
+            catalog_max_output_source = Some(source.clone());
+        }
+        if let Some(value) = layer.modalities {
+            catalog_modalities = Some(value.clone());
+        }
+        if let Some(value) = layer.model_type {
+            catalog_model_type = Some(value.to_string());
+            catalog_model_type_source = Some(source.clone());
+        }
+
+        if let Some(layer_prices) = layer.prices {
+            if layer_prices.input_per_1m.is_some() {
+                catalog_input_price_source = Some(source.clone());
+            }
+            if layer_prices.output_per_1m.is_some() {
+                catalog_output_price_source = Some(source.clone());
+            }
+            if layer_prices.cached_per_1m.is_some() {
+                catalog_cached_price_source = Some(source.clone());
+            }
+            if layer_prices.cache_write_per_1m.is_some() {
+                catalog_cache_write_price_source = Some(source.clone());
+            }
+            if layer_prices.thinking_per_1m.is_some() {
+                catalog_thinking_price_source = Some(source.clone());
+            }
+            overlay_prices(&mut catalog_prices, layer_prices);
+        }
+
+        if let Some(mut reasoning) =
+            normalize_plugin_reasoning_capability_v1(layer.capabilities_json)
+        {
+            if layer.kind == crate::model_catalog::CatalogLayerKind::Provider
+                && wire == WireFormat::Gemini
+            {
+                reasoning.upstream_format = "gemini_thinking_level".to_string();
+            }
+            catalog_reasoning = Some((reasoning.clone(), source.clone()));
+            if has_reasoning_details(&reasoning) {
+                catalog_detailed_reasoning = Some((reasoning, source));
+            }
+        }
+    }
 
     let plugin_flags = fallback_metadata
         .as_ref()
-        .and_then(plugin_capability_flags_v1)
-        .unwrap_or_default();
-    let catalog_flags = catalog_metadata
         .and_then(plugin_capability_flags_v1)
         .unwrap_or_default();
     let provider_flags = provider_metadata
@@ -1310,10 +1419,6 @@ fn discovered_observation_with_catalog(
         .as_ref()
         .map(discovery_prices)
         .unwrap_or_default();
-    let catalog_prices = catalog
-        .as_ref()
-        .map(|entry| entry.prices.clone())
-        .unwrap_or_default();
     let mut prices = catalog_prices.clone();
     overlay_prices(&mut prices, &plugin_prices);
     overlay_prices(&mut prices, &provider_prices);
@@ -1322,38 +1427,38 @@ fn discovered_observation_with_catalog(
             provider_prices.input_per_1m,
             plugin_prices.input_per_1m,
             catalog_prices.input_per_1m,
-            catalog_source.as_deref(),
+            catalog_input_price_source.as_deref(),
         ),
         "output_per_1m": price_source(
             provider_prices.output_per_1m,
             plugin_prices.output_per_1m,
             catalog_prices.output_per_1m,
-            catalog_source.as_deref(),
+            catalog_output_price_source.as_deref(),
         ),
         "cached_per_1m": price_source(
             provider_prices.cached_per_1m,
             plugin_prices.cached_per_1m,
             catalog_prices.cached_per_1m,
-            catalog_source.as_deref(),
+            catalog_cached_price_source.as_deref(),
         ),
         "cache_write_per_1m": price_source(
             provider_prices.cache_write_per_1m,
             plugin_prices.cache_write_per_1m,
             catalog_prices.cache_write_per_1m,
-            catalog_source.as_deref(),
+            catalog_cache_write_price_source.as_deref(),
         ),
         "thinking_per_1m": price_source(
             provider_prices.thinking_per_1m,
             plugin_prices.thinking_per_1m,
             catalog_prices.thinking_per_1m,
-            catalog_source.as_deref(),
+            catalog_thinking_price_source.as_deref(),
         ),
     });
     let modalities = provider_metadata
         .as_ref()
         .and_then(normalized_modalities)
         .or_else(|| fallback_metadata.as_ref().and_then(normalized_modalities))
-        .or_else(|| catalog.as_ref().and_then(|entry| entry.modalities.clone()));
+        .or(catalog_modalities);
     let (raw_metadata, raw_metadata_truncated) = bounded_raw_metadata(provider_metadata.as_ref());
 
     let provider_declares_reasoning = provider_metadata
@@ -1374,13 +1479,7 @@ fn discovered_observation_with_catalog(
     let plugin_support = fallback_metadata
         .as_ref()
         .and_then(plugin_reasoning_support_v1);
-    let mut catalog_reasoning = catalog_metadata.and_then(normalize_plugin_reasoning_capability_v1);
-    if wire == WireFormat::Gemini {
-        if let Some(reasoning) = catalog_reasoning.as_mut() {
-            reasoning.upstream_format = "gemini_thinking_level".to_string();
-        }
-    }
-    let catalog_support = catalog_metadata.and_then(plugin_reasoning_support_v1);
+    let catalog_support = catalog_flags.reasoning;
 
     let provider_reasoning_is_authoritative =
         provider_declares_reasoning || provider_flags.reasoning.is_some();
@@ -1389,12 +1488,8 @@ fn discovered_observation_with_catalog(
     } else if plugin_support.is_some() {
         (plugin_support, Some("plugin_capabilities_json".to_string()))
     } else {
-        (catalog_support, catalog_source.clone())
+        (catalog_support, catalog_reasoning_source.clone())
     };
-
-    fn has_reasoning_details(capability: &crate::adapters::ReasoningCapability) -> bool {
-        capability.mode.is_some() || !capability.levels.is_empty() || capability.default.is_some()
-    }
 
     let detailed_reasoning = provider_reasoning
         .as_ref()
@@ -1408,13 +1503,7 @@ fn discovered_observation_with_catalog(
                 .cloned()
                 .map(|capability| (capability, "plugin_capabilities_json".to_string()))
         })
-        .or_else(|| {
-            catalog_reasoning
-                .as_ref()
-                .filter(|capability| has_reasoning_details(capability))
-                .cloned()
-                .zip(catalog_source.clone())
-        });
+        .or(catalog_detailed_reasoning);
 
     let supported_only_reasoning = provider_reasoning
         .clone()
@@ -1424,7 +1513,7 @@ fn discovered_observation_with_catalog(
                 .clone()
                 .map(|capability| (capability, "plugin_capabilities_json".to_string()))
         })
-        .or_else(|| catalog_reasoning.clone().zip(catalog_source.clone()));
+        .or(catalog_reasoning);
 
     let provider_blocks_fallback = provider_declares_reasoning
         && provider_reasoning.is_none()
@@ -1448,17 +1537,17 @@ fn discovered_observation_with_catalog(
 
     let context_source = if model.context_window.is_some() {
         Some("upstream_discovery".to_string())
-    } else if let Some(value) = catalog.as_ref().and_then(|entry| entry.context_window) {
+    } else if let Some(value) = catalog_context_window {
         model.context_window = Some(value);
-        catalog_source.clone()
+        catalog_context_source
     } else {
         None
     };
     let max_output_source = if model.max_output_tokens.is_some() {
         Some("upstream_discovery".to_string())
-    } else if let Some(value) = catalog.as_ref().and_then(|entry| entry.max_output_tokens) {
+    } else if let Some(value) = catalog_max_output_tokens {
         model.max_output_tokens = Some(value);
-        catalog_source.clone()
+        catalog_max_output_source
     } else {
         None
     };
@@ -1475,36 +1564,45 @@ fn discovered_observation_with_catalog(
             provider_flags.text,
             plugin_flags.text,
             catalog_flags.text,
-            catalog_source.as_deref(),
+            catalog_text_source.as_deref(),
         ),
         "reasoning": reasoning_source,
         "vision": capability_source(
             provider_flags.vision,
             plugin_flags.vision,
             catalog_flags.vision,
-            catalog_source.as_deref(),
+            catalog_vision_source.as_deref(),
         ),
         "tool_calling": capability_source(
             provider_flags.tool_calling,
             plugin_flags.tool_calling,
             catalog_flags.tool_calling,
-            catalog_source.as_deref(),
+            catalog_tools_source.as_deref(),
         ),
         "structured_output": capability_source(
             provider_flags.structured_output,
             plugin_flags.structured_output,
             catalog_flags.structured_output,
-            catalog_source.as_deref(),
+            catalog_structured_source.as_deref(),
         ),
+        "model_type": catalog_model_type_source,
     });
 
-    let catalog = catalog.as_ref().map(|entry| {
-        json!({
-            "source": entry.provenance(),
-            "reference": entry.reference(),
-            "url": entry.source_url.as_deref(),
-        })
+    let canonical_identity = catalog.as_ref().map(|entry| entry.identity.to_json());
+    let canonical_model_id = catalog
+        .as_ref()
+        .and_then(|entry| entry.identity.canonical_model_id.clone());
+    let canonical_match = catalog.as_ref().and_then(|entry| {
+        entry
+            .identity
+            .match_kind
+            .map(crate::model_catalog::CanonicalMatchKind::label)
+            .map(str::to_string)
     });
+    let catalog_json = catalog
+        .as_ref()
+        .map(crate::model_catalog::CatalogResolution::catalog_json);
+    let execution_supported = catalog_model_type.is_none();
     let thinking_map = reasoning
         .as_ref()
         .and_then(|capability| thinking_map_for_reasoning_with_wire(capability, wire));
@@ -1521,7 +1619,12 @@ fn discovered_observation_with_catalog(
         price_sources,
         raw_metadata,
         raw_metadata_truncated,
-        catalog,
+        canonical_identity,
+        canonical_model_id,
+        canonical_match,
+        model_type: catalog_model_type,
+        execution_supported,
+        catalog: catalog_json,
     }
 }
 
@@ -1682,7 +1785,7 @@ pub async fn discover_models(
                     provider_metadata,
                     fallback_metadata,
                     reasoning_wire_context(&provider),
-                    catalog,
+                    Some(catalog),
                 )
             })
             .collect()
@@ -1723,6 +1826,11 @@ pub async fn discover_models(
                     "price_sources": &observation.price_sources,
                     "raw_metadata": &observation.raw_metadata,
                     "raw_metadata_truncated": observation.raw_metadata_truncated,
+                    "canonical_identity": &observation.canonical_identity,
+                    "canonical_model_id": &observation.canonical_model_id,
+                    "canonical_match": &observation.canonical_match,
+                    "model_type": &observation.model_type,
+                    "execution_supported": observation.execution_supported,
                     "catalog": &observation.catalog,
                     "disappeared": false,
                 }),
@@ -1743,6 +1851,11 @@ pub async fn discover_models(
             "price_sources": &observation.price_sources,
             "raw_metadata": &observation.raw_metadata,
             "raw_metadata_truncated": observation.raw_metadata_truncated,
+            "canonical_identity": &observation.canonical_identity,
+            "canonical_model_id": &observation.canonical_model_id,
+            "canonical_match": &observation.canonical_match,
+            "model_type": &observation.model_type,
+            "execution_supported": observation.execution_supported,
             "catalog": &observation.catalog,
             "already_imported": existing.iter().any(|e| e.upstream_id == m.id),
         }));
@@ -1882,7 +1995,7 @@ async fn discover_models_native(
                 provider_metadata,
                 None,
                 reasoning_wire_context(provider),
-                catalog,
+                Some(catalog),
             )
         })
         .collect())
