@@ -1214,12 +1214,8 @@ fn resolve_with_bundled(
     let models_dev_provider =
         models_dev.and_then(|catalog| catalog.provider_match(base_url, model_id));
 
-    let fallback_canonical = models_dev_canonical
-        .as_ref()
-        .and(bundled_canonical.clone());
-    let fallback_provider = models_dev_provider
-        .as_ref()
-        .and(bundled_provider.clone());
+    let fallback_canonical = models_dev_canonical.as_ref().and(bundled_canonical.clone());
+    let fallback_provider = models_dev_provider.as_ref().and(bundled_provider.clone());
     let canonical = models_dev_canonical.or(bundled_canonical);
     let provider = models_dev_provider.or(bundled_provider);
 
