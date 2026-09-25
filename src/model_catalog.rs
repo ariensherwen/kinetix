@@ -177,6 +177,8 @@ pub struct CatalogResolution {
     pub identity: CanonicalIdentity,
     pub canonical: Option<CanonicalModelMatch>,
     pub provider: Option<ProviderModelMatch>,
+    pub fallback_canonical: Option<CanonicalModelMatch>,
+    pub fallback_provider: Option<ProviderModelMatch>,
 }
 
 pub struct CatalogLayer<'a> {
@@ -203,6 +205,8 @@ impl CatalogResolution {
             identity: CanonicalIdentity::unresolved(upstream_model_id),
             canonical: None,
             provider: None,
+            fallback_canonical: None,
+            fallback_provider: None,
         }
     }
 
@@ -213,6 +217,33 @@ impl CatalogResolution {
     /// the canonical default.
     pub fn layers(&self) -> Vec<CatalogLayer<'_>> {
         let mut layers = Vec::new();
+
+        if let Some(canonical) = self.fallback_canonical.as_ref() {
+            layers.push(CatalogLayer {
+                source: canonical.source,
+                kind: CatalogLayerKind::Canonical,
+                context_window: canonical.context_window,
+                max_input_tokens: canonical.max_input_tokens,
+                max_output_tokens: canonical.max_output_tokens,
+                capabilities_json: &canonical.capabilities_json,
+                modalities: canonical.modalities.as_ref(),
+                prices: None,
+                model_type: canonical.model_type.as_deref(),
+            });
+        }
+        if let Some(provider) = self.fallback_provider.as_ref() {
+            layers.push(CatalogLayer {
+                source: provider.source,
+                kind: CatalogLayerKind::Provider,
+                context_window: provider.context_window,
+                max_input_tokens: provider.max_input_tokens,
+                max_output_tokens: provider.max_output_tokens,
+                capabilities_json: &provider.capabilities_json,
+                modalities: provider.modalities.as_ref(),
+                prices: Some(&provider.prices),
+                model_type: provider.model_type.as_deref(),
+            });
+        }
 
         if let Some(canonical) = self
             .canonical
@@ -315,6 +346,10 @@ impl CatalogResolution {
         json!({
             "canonical": self.canonical.as_ref().map(canonical_json),
             "provider": self.provider.as_ref().map(provider_json),
+            "fallback": {
+                "canonical": self.fallback_canonical.as_ref().map(canonical_json),
+                "provider": self.fallback_provider.as_ref().map(provider_json),
+            },
         })
     }
 }
@@ -1161,28 +1196,39 @@ fn resolve_with_bundled(
         &bundled,
     );
 
-    let canonical = identity
+    let bundled_canonical = identity
         .canonical_model_id
         .as_deref()
         .and_then(|canonical_id| {
-            models_dev
-                .and_then(|catalog| catalog.canonical_match(canonical_id))
-                .or_else(|| {
-                    bundled
-                        .models
-                        .get(canonical_id)
-                        .map(|model| bundled_canonical_match(canonical_id, model))
-                })
+            bundled
+                .models
+                .get(canonical_id)
+                .map(|model| bundled_canonical_match(canonical_id, model))
         });
+    let models_dev_canonical = identity
+        .canonical_model_id
+        .as_deref()
+        .and_then(|canonical_id| {
+            models_dev.and_then(|catalog| catalog.canonical_match(canonical_id))
+        });
+    let models_dev_provider =
+        models_dev.and_then(|catalog| catalog.provider_match(base_url, model_id));
 
-    let provider = models_dev
-        .and_then(|catalog| catalog.provider_match(base_url, model_id))
-        .or(bundled_provider);
+    let fallback_canonical = models_dev_canonical
+        .as_ref()
+        .and(bundled_canonical.clone());
+    let fallback_provider = models_dev_provider
+        .as_ref()
+        .and(bundled_provider.clone());
+    let canonical = models_dev_canonical.or(bundled_canonical);
+    let provider = models_dev_provider.or(bundled_provider);
 
     CatalogResolution {
         identity,
         canonical,
         provider,
+        fallback_canonical,
+        fallback_provider,
     }
 }
 
@@ -1501,6 +1547,84 @@ mod tests {
         );
         assert!(resolved.canonical.is_none());
         assert!(resolved.provider.is_none());
+    }
+
+    #[test]
+    fn models_dev_only_overrides_present_bundled_fields() {
+        let catalog = ModelsDevCatalog::from_parts(
+            json!({
+                "vendor/model": {
+                    "id": "vendor/model",
+                    "reasoning": true,
+                    "limit": {"context": 200000}
+                }
+            }),
+            json!({}),
+        )
+        .unwrap();
+        let bundled = r#"{
+          "schema_version": 2,
+          "models": {
+            "vendor/model": {
+              "context_window": 100000,
+              "max_output_tokens": 32000,
+              "capabilities_json": {
+                "schema_version": 1,
+                "tools": {"supported": true}
+              }
+            }
+          },
+          "aliases": [],
+          "provider_overrides": []
+        }"#;
+        let resolved = resolve_with_bundled(
+            "https://unknown.example/v1",
+            "model",
+            None,
+            Some(&catalog),
+            bundled,
+        );
+        let layers = resolved.layers();
+
+        assert_eq!(layers.len(), 2);
+        assert_eq!(layers[0].provenance(), "bundled_catalog");
+        assert_eq!(layers[1].provenance(), "models.dev:canonical");
+        assert_eq!(layers[0].max_output_tokens, Some(32_000));
+        assert_eq!(layers[1].max_output_tokens, None);
+    }
+
+    #[test]
+    fn canonical_modalities_preserve_supported_media_types() {
+        let catalog = ModelsDevCatalog::from_parts(
+            json!({
+                "vendor/multimodal": {
+                    "id": "vendor/multimodal",
+                    "modalities": {
+                        "input": ["text", "image", "audio", "video", "pdf"],
+                        "output": ["text", "image", "audio", "video"]
+                    }
+                }
+            }),
+            json!({}),
+        )
+        .unwrap();
+        let resolved = resolve_with_bundled(
+            "https://unknown.example/v1",
+            "multimodal",
+            None,
+            Some(&catalog),
+            r#"{"schema_version":2,"models":{},"aliases":[],"provider_overrides":[]}"#,
+        );
+        let modalities = resolved.canonical.unwrap().modalities.unwrap();
+
+        assert_eq!(
+            modalities["input"],
+            json!(["text", "image", "audio", "video", "pdf"])
+        );
+        assert_eq!(
+            modalities["output"],
+            json!(["text", "image", "audio", "video"])
+        );
     }
 
     #[test]
