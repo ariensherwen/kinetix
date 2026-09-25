@@ -62,6 +62,12 @@ jobs:
           path: dashboard/dist
       - run: cargo clippy --all-targets
       - run: cargo test --quiet
+      - run: cargo build --quiet --bin kinetix
+      - run: bash scripts/compat-matrix.sh
+        env:
+          KINETIX_BIN: target/debug/kinetix
+          SYN_TOKENS: "4"
+          SYN_DELAY_MS: "0"
 
   dependency-policy:
     runs-on: ubuntu-latest
