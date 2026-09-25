@@ -7072,7 +7072,11 @@ mod reasoning_discovery_control_plane_tests {
             .as_ref()
             .is_some_and(|reasoning| reasoning.levels.is_empty()));
         assert!(observation.thinking_map.is_none());
-        assert_eq!(observation.prices, Prices::default());
+        assert!(observation.prices.input_per_1m.is_none());
+        assert!(observation.prices.output_per_1m.is_none());
+        assert!(observation.prices.cached_per_1m.is_none());
+        assert!(observation.prices.cache_write_per_1m.is_none());
+        assert!(observation.prices.thinking_per_1m.is_none());
         assert_eq!(
             observation.capability_sources["reasoning"],
             json!("bundled_catalog")
