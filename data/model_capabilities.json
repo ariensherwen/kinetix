@@ -1,15 +1,49 @@
 {
-  "schema_version": 1,
-  "providers": [
+  "schema_version": 2,
+  "models": {
+    "deepseek/deepseek-v4.1-flash": {
+      "context_window": 1000000,
+      "max_output_tokens": 384000,
+      "capabilities_json": {
+        "schema_version": 1,
+        "reasoning": {
+          "supported": true
+        },
+        "tools": {
+          "supported": true
+        },
+        "vision": {
+          "input": true
+        },
+        "structured_output": {
+          "supported": true
+        }
+      },
+      "source_url": "https://docs.b.ai/llmservice/models/deepseek-v4-1-flash/"
+    },
+    "anthropic/claude-opus-4-6": {},
+    "xiaomi/mimo-v2.6-flash": {}
+  },
+  "aliases": [
     {
+      "id": "claude-opus-4-6-thinking",
+      "canonical_model_id": "anthropic/claude-opus-4-6"
+    },
+    {
+      "id": "mimo-v2.6-flash-free",
+      "canonical_model_id": "xiaomi/mimo-v2.6-flash"
+    }
+  ],
+  "provider_overrides": [
+    {
+      "provider_id": "b-ai",
       "base_urls": [
         "https://api.b.ai/v1"
       ],
       "models": [
         {
           "id": "DeepSeek-V4.1-Flash",
-          "context_window": 1000000,
-          "max_output_tokens": 384000,
+          "canonical_model_id": "deepseek/deepseek-v4.1-flash",
           "capabilities_json": {
             "schema_version": 1,
             "reasoning": {
@@ -22,15 +56,6 @@
               ],
               "default": "high",
               "can_disable": false
-            },
-            "tools": {
-              "supported": true
-            },
-            "vision": {
-              "input": true
-            },
-            "structured_output": {
-              "supported": true
             }
           },
           "source_url": "https://docs.b.ai/llmservice/models/deepseek-v4-1-flash/"
