@@ -204,6 +204,7 @@ export const ProvidersView: React.FC<ProvidersViewProps> = ({
   };
 
   const handleImportDiscoveredModel = (m: DiscoveredModel) => {
+    if (m.execution_supported === false) return;
     const discoveredThinking = m.thinking_map;
     const discoveredPrices = m.prices;
     const newModel: ModelConfig = {
@@ -255,6 +256,11 @@ export const ProvidersView: React.FC<ProvidersViewProps> = ({
         price_sources: m.price_sources || {},
         raw_metadata: m.raw_metadata ?? null,
         raw_metadata_truncated: m.raw_metadata_truncated ?? false,
+        canonical_identity: m.canonical_identity || null,
+        canonical_model_id: m.canonical_model_id || null,
+        canonical_match: m.canonical_match || null,
+        model_type: m.model_type || null,
+        execution_supported: m.execution_supported ?? true,
         catalog: m.catalog || null,
         imported_from_discovery: true,
       },
@@ -869,6 +875,16 @@ export const ProvidersView: React.FC<ProvidersViewProps> = ({
                         className="bg-[var(--surface)] border-2 border-[var(--ink)] px-3 py-1.5 text-xs font-mono sketch-shadow-sm flex items-center gap-2 rounded"
                       >
                         <span className="font-bold">{m.id}</span>
+                        {m.canonical_model_id ? (
+                          <span className="text-[var(--ink)]/50">
+                            canonical: {m.canonical_model_id}
+                          </span>
+                        ) : null}
+                        {m.model_type ? (
+                          <span className="text-[var(--marker-red)]">
+                            type: {m.model_type}
+                          </span>
+                        ) : null}
                         {m.context_window ? (
                           <span className="text-[var(--ink)]/50">{m.context_window.toLocaleString()} ctx</span>
                         ) : null}
@@ -885,6 +901,10 @@ export const ProvidersView: React.FC<ProvidersViewProps> = ({
                         ) : null}
                         {m.already_imported ? (
                           <span className="text-[var(--pen-green)] font-bold">✓ imported</span>
+                        ) : m.execution_supported === false ? (
+                          <span className="text-[var(--marker-red)] font-bold">
+                            not executable
+                          </span>
                         ) : (
                           <button
                             onClick={() => handleImportDiscoveredModel(m)}
