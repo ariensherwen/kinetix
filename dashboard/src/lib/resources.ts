@@ -71,7 +71,39 @@ export interface DiscoveredModel {
   price_sources?: Record<string, string | null> | null;
   raw_metadata?: unknown | null;
   raw_metadata_truncated?: boolean;
-  catalog?: { id?: string; source?: string | null; reference?: string | null; url?: string | null } | null;
+  canonical_identity?: {
+    status: 'resolved' | 'ambiguous' | 'unresolved';
+    upstream_model_id: string;
+    canonical_model_id?: string | null;
+    match?: string | null;
+    source?: string | null;
+    candidates?: string[];
+  } | null;
+  canonical_model_id?: string | null;
+  canonical_match?: string | null;
+  model_type?: string | null;
+  execution_supported?: boolean;
+  catalog?: {
+    canonical?: {
+      source?: string | null;
+      reference?: string | null;
+      canonical_model_id?: string | null;
+      url?: string | null;
+      model_type?: string | null;
+      max_input_tokens?: number | null;
+      metadata?: unknown;
+    } | null;
+    provider?: {
+      source?: string | null;
+      reference?: string | null;
+      provider_id?: string | null;
+      model_id?: string | null;
+      url?: string | null;
+      model_type?: string | null;
+      max_input_tokens?: number | null;
+      metadata?: unknown;
+    } | null;
+  } | null;
   already_imported: boolean;
 }
 
