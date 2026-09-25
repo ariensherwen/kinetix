@@ -678,10 +678,7 @@ fn metadata_snapshot(model: &Value, provider_specific: bool) -> Value {
     Value::Object(out)
 }
 
-fn models_dev_canonical_match(
-    canonical_id: &str,
-    model: &Value,
-) -> Option<CanonicalModelMatch> {
+fn models_dev_canonical_match(canonical_id: &str, model: &Value) -> Option<CanonicalModelMatch> {
     model.as_object()?;
     Some(CanonicalModelMatch {
         source: CatalogSource::ModelsDev,
@@ -691,7 +688,10 @@ fn models_dev_canonical_match(
         max_output_tokens: model.pointer("/limit/output").and_then(Value::as_i64),
         capabilities_json: base_capabilities(model, false),
         modalities: normalized_modalities(model),
-        model_type: model.get("type").and_then(Value::as_str).map(str::to_string),
+        model_type: model
+            .get("type")
+            .and_then(Value::as_str)
+            .map(str::to_string),
         metadata: metadata_snapshot(model, false),
         source_url: Some(MODELS_DEV_CATALOG_URL.to_string()),
     })
@@ -726,7 +726,10 @@ fn models_dev_provider_match(
         capabilities_json: base_capabilities(model, true),
         modalities: normalized_modalities(model),
         prices,
-        model_type: model.get("type").and_then(Value::as_str).map(str::to_string),
+        model_type: model
+            .get("type")
+            .and_then(Value::as_str)
+            .map(str::to_string),
         metadata: metadata_snapshot(model, true),
         source_url: Some(MODELS_DEV_CATALOG_URL.to_string()),
     })
@@ -1108,7 +1111,11 @@ fn identity_for(
         };
     }
 
-    if let Some(alias) = bundled.aliases.iter().find(|alias| alias.id == upstream_model_id) {
+    if let Some(alias) = bundled
+        .aliases
+        .iter()
+        .find(|alias| alias.id == upstream_model_id)
+    {
         return resolved(
             alias.canonical_model_id.clone(),
             CanonicalMatchKind::ExplicitAlias,
@@ -1144,10 +1151,9 @@ fn resolve_with_bundled(
 ) -> CatalogResolution {
     let bundled = parse_bundled(bundled_json).unwrap_or_default();
 
-    let (bundled_provider, bundled_hint) =
-        lookup_bundled_provider(&bundled, base_url, model_id)
-            .map(|(provider, hint)| (Some(provider), hint))
-            .unwrap_or((None, None));
+    let (bundled_provider, bundled_hint) = lookup_bundled_provider(&bundled, base_url, model_id)
+        .map(|(provider, hint)| (Some(provider), hint))
+        .unwrap_or((None, None));
     let identity = identity_for(
         model_id,
         explicit_hint.or(bundled_hint.as_deref()),
@@ -1155,16 +1161,19 @@ fn resolve_with_bundled(
         &bundled,
     );
 
-    let canonical = identity.canonical_model_id.as_deref().and_then(|canonical_id| {
-        models_dev
-            .and_then(|catalog| catalog.canonical_match(canonical_id))
-            .or_else(|| {
-                bundled
-                    .models
-                    .get(canonical_id)
-                    .map(|model| bundled_canonical_match(canonical_id, model))
-            })
-    });
+    let canonical = identity
+        .canonical_model_id
+        .as_deref()
+        .and_then(|canonical_id| {
+            models_dev
+                .and_then(|catalog| catalog.canonical_match(canonical_id))
+                .or_else(|| {
+                    bundled
+                        .models
+                        .get(canonical_id)
+                        .map(|model| bundled_canonical_match(canonical_id, model))
+                })
+        });
 
     let provider = models_dev
         .and_then(|catalog| catalog.provider_match(base_url, model_id))
@@ -1486,7 +1495,10 @@ mod tests {
             Some(&catalog),
             bundled_v2(),
         );
-        assert_eq!(resolved.identity.status, CanonicalIdentityStatus::Unresolved);
+        assert_eq!(
+            resolved.identity.status,
+            CanonicalIdentityStatus::Unresolved
+        );
         assert!(resolved.canonical.is_none());
         assert!(resolved.provider.is_none());
     }
@@ -1526,7 +1538,9 @@ mod tests {
         );
         let canonical = resolved.canonical.unwrap();
         assert_eq!(canonical.capabilities_json["reasoning"]["supported"], true);
-        assert!(canonical.capabilities_json["reasoning"].get("levels").is_none());
+        assert!(canonical.capabilities_json["reasoning"]
+            .get("levels")
+            .is_none());
         assert!(resolved.provider.is_none());
     }
 
@@ -1736,8 +1750,13 @@ mod tests {
             }]
           }]
         }"#;
-        let resolved =
-            resolve_with_bundled("https://api.b.ai/v1", "DeepSeek-V4.1-Flash", None, None, legacy);
+        let resolved = resolve_with_bundled(
+            "https://api.b.ai/v1",
+            "DeepSeek-V4.1-Flash",
+            None,
+            None,
+            legacy,
+        );
         assert!(resolved.provider.is_some());
     }
 }
