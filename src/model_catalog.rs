@@ -955,7 +955,7 @@ fn lookup_bundled_provider(
     catalog: &BundledCatalog,
     base_url: &str,
     model_id: &str,
-) -> Option<ProviderModelMatch> {
+) -> Option<(ProviderModelMatch, Option<String>)> {
     let url = url::Url::parse(base_url).ok()?;
     let host = url.host_str()?.trim_end_matches('.').to_ascii_lowercase();
     let normalized_base = normalize_base_url(base_url)?;
@@ -967,21 +967,24 @@ fn lookup_bundled_provider(
             continue;
         }
         let model = provider.models.iter().find(|model| model.id == model_id)?;
-        return Some(ProviderModelMatch {
-            source: CatalogSource::BundledCatalog,
-            provider_id: provider.provider_id.clone().unwrap_or_else(|| host.clone()),
-            host,
-            model_id: model.id.clone(),
-            context_window: model.context_window,
-            max_input_tokens: model.max_input_tokens,
-            max_output_tokens: model.max_output_tokens,
-            capabilities_json: model.capabilities_json.clone(),
-            modalities: model.modalities.clone(),
-            prices: model.prices.clone(),
-            model_type: model.model_type.clone(),
-            metadata: model.metadata.clone(),
-            source_url: model.source_url.clone(),
-        });
+        return Some((
+            ProviderModelMatch {
+                source: CatalogSource::BundledCatalog,
+                provider_id: provider.provider_id.clone().unwrap_or_else(|| host.clone()),
+                host,
+                model_id: model.id.clone(),
+                context_window: model.context_window,
+                max_input_tokens: model.max_input_tokens,
+                max_output_tokens: model.max_output_tokens,
+                capabilities_json: model.capabilities_json.clone(),
+                modalities: model.modalities.clone(),
+                prices: model.prices.clone(),
+                model_type: model.model_type.clone(),
+                metadata: model.metadata.clone(),
+                source_url: model.source_url.clone(),
+            },
+            model.canonical_model_id.clone(),
+        ));
     }
     None
 }
@@ -1138,20 +1141,13 @@ fn resolve_with_bundled(
 ) -> CatalogResolution {
     let bundled = parse_bundled(bundled_json).unwrap_or_default();
 
-    let bundled_provider = lookup_bundled_provider(&bundled, base_url, model_id);
-    let bundled_hint = bundled_provider
-        .as_ref()
-        .and_then(|provider| {
-            bundled
-                .provider_overrides
-                .iter()
-                .flat_map(|entry| entry.models.iter())
-                .find(|entry| entry.id == provider.model_id)
-                .and_then(|entry| entry.canonical_model_id.as_deref())
-        });
+    let (bundled_provider, bundled_hint) =
+        lookup_bundled_provider(&bundled, base_url, model_id)
+            .map(|(provider, hint)| (Some(provider), hint))
+            .unwrap_or((None, None));
     let identity = identity_for(
         model_id,
-        explicit_hint.or(bundled_hint),
+        explicit_hint.or(bundled_hint.as_deref()),
         models_dev,
         &bundled,
     );
