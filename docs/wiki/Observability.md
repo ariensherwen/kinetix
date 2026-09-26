@@ -16,6 +16,19 @@ It stays **HTTP 200** while the data plane is serviceable. `control_plane:
 degraded` means the store is unavailable but inference still works from the
 in-memory snapshot, so the instance is not dropped from a load balancer.
 
+## Runtime health
+
+`GET /admin/api/health/runtime` requires admin auth. Its `window` query accepts
+`5m`, `1h`, or `24h` (default `1h`). The response combines persisted telemetry
+at provider, account, and model scope with live provider circuit states and
+quota observations.
+
+Telemetry keeps separate counters for rate limits, quota exhaustion, server
+errors, connection errors, timeouts, authentication errors, target errors, and
+bad requests. A quota observation becomes stale and neutral to adaptive routing
+when its reset time passes. A response header explicitly reporting zero
+remaining marks the account exhausted through the pool-health path.
+
 ## Metrics
 
 `GET /admin/api/metrics` emits Prometheus text (requires admin auth):
